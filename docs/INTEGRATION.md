@@ -29,11 +29,15 @@ Sidecar talks only to the operator repo APIs:
 | Variable | Meaning |
 | --- | --- |
 | `BMS_PLATFORM_URL` | Operator base URL (lab: `http://host.docker.internal:8080`) |
-| `BMS_ENROLL_TOKEN` | Bearer enroll token from deployment |
+| Enroll file `/config/bms_enroll.json` | From enroll UI (:8099); preferred token + `unique_id` |
+| `BMS_ENROLL_TOKEN` | Env fallback if no enroll file |
+| `BMS_APPLIANCE_UID` | Env fallback unique ID (must match token) |
 | `BMS_HA_URL` | In-compose HA URL (`http://homeassistant:8123`) |
 | `BMS_HA_TOKEN` | Optional long-lived HA token — **GET only** |
 | `BMS_INTERVAL` | Poll seconds (default 20) |
 | `BMS_CLIMATE_ENTITY` | Preferred climate entity (default `climate.heat_pump`) |
+
+Lab enroll: see [ONBOARDING_LAB.md](ONBOARDING_LAB.md). Heartbeat includes `appliance_uid` when known.
 
 The agent never calls `/api/services`.
 

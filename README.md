@@ -22,6 +22,7 @@ The house box is **not** the operator console and **not** a company portal. HVAC
 | --- | --- |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, network, privacy model |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | How the box talks to BMS (ingest contract) |
+| [docs/ONBOARDING_LAB.md](docs/ONBOARDING_LAB.md) | Lab enroll UI (:8099) + announce with unique ID |
 | [docs/TECHNICIAN_SETUP.md](docs/TECHNICIAN_SETUP.md) | On-site device pairing procedure |
 | [docs/REBRAND.md](docs/REBRAND.md) | Product rebrand inventory and phases |
 | [docs/UPSTREAM_HA.md](docs/UPSTREAM_HA.md) | Which Home Assistant org repos matter |

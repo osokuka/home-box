@@ -1,0 +1,17 @@
+.env
+config/secrets.yaml
+config/bms_enroll.json
+config/bms_enroll.tmp
+config/.storage/
+config/*.db
+config/*.db-*
+config/*.log
+config/*.log.*
+config/.HA_VERSION
+config/deps/
+config/tts/
+config/blueprints/
+config/home-assistant.log*
+config/.cloud/
+tuya/tinytuya.json
+tuya/lan-routes.json

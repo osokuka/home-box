@@ -23,4 +23,6 @@ You set up **devices on the house box**. You do not assign HVAC companies. You d
 
 ## Platform ping
 
-`.env` has `BMS_PLATFORM_URL` and `BMS_ENROLL_TOKEN`. `docker compose logs platform-agent` should show `ok slug=…` when the operator platform is up. Optional `BMS_HA_TOKEN` = long-lived token from the owner profile, GET-only.
+1. Enroll: open **http://127.0.0.1:8099/** and paste the operator QR JSON (or set `BMS_ENROLL_TOKEN` / `BMS_APPLIANCE_UID` in `.env`).
+2. `docker compose logs platform-agent` should show `ok slug=… uid=…` when the operator platform is up.
+3. Optional `BMS_HA_TOKEN` = long-lived token from the owner profile, GET-only.

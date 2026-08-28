@@ -1,0 +1,100 @@
+services:
+  homeassistant:
+    container_name: homeassistant
+    build:
+      context: ./image
+      dockerfile: Dockerfile
+    image: ha-box:local
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+    volumes:
+      - ./config:/config
+      - ./image/configuration.yaml:/config/configuration.yaml:ro
+      - ./image/packages:/config/packages:ro
+      - ./image/www:/config/www:ro
+    # Same pattern as BMS for now: published HTTP. WireGuard is later.
+    ports:
+      - "8123:8123"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - ha
+
+  platform-agent:
+    image: python:3.12-alpine
+    container_name: ha-platform-agent
+    restart: unless-stopped
+    working_dir: /app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-http://host.docker.internal:8080}
+      BMS_ENROLL_TOKEN: ${BMS_ENROLL_TOKEN:-}
+      BMS_APPLIANCE_UID: ${BMS_APPLIANCE_UID:-}
+      BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
+      BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
+      BMS_INTERVAL: ${BMS_INTERVAL:-20}
+      BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-climate.heat_pump}
+      HA_CONFIG: /config
+    volumes:
+      - ./platform/agent.py:/app/agent.py:ro
+      - ./platform/enroll_store.py:/app/enroll_store.py:ro
+      - ./config:/config:ro
+    command: ["python", "-u", "/app/agent.py"]
+    depends_on:
+      - homeassistant
+    networks:
+      - ha
+
+  # Lab first-run: paste operator QR JSON → /config/bms_enroll.json
+  enroll-ui:
+    image: python:3.12-alpine
+    container_name: ha-enroll-ui
+    restart: unless-stopped
+    working_dir: /app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-http://host.docker.internal:8080}
+      BMS_ENROLL_UI_PORT: "8099"
+      HA_CONFIG: /config
+    ports:
+      - "8099:8099"
+    volumes:
+      - ./platform/enroll_ui.py:/app/enroll_ui.py:ro
+      - ./platform/enroll_store.py:/app/enroll_store.py:ro
+      - ./config:/config
+    command: ["python", "-u", "/app/enroll_ui.py"]
+    networks:
+      - ha
+
+  lan-router:
+    image: python:3.12-alpine
+    container_name: ha-lan-router
+    restart: unless-stopped
+    network_mode: "service:homeassistant"
+    cap_add:
+      - NET_ADMIN
+    environment:
+      ENABLE_LAN_SOCKS: ${ENABLE_LAN_SOCKS:-1}
+    volumes:
+      - ./tuya/transparent-socks.py:/app/transparent-socks.py:ro
+      - ./network/protect-egress.sh:/app/protect-egress.sh:ro
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache iptables ip6tables >/dev/null
+        sh /app/protect-egress.sh
+        if [ "$${ENABLE_LAN_SOCKS:-1}" = "1" ]; then
+          exec python /app/transparent-socks.py
+        fi
+        sleep infinity
+
+networks:
+  ha:
+    name: ha
