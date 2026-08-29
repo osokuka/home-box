@@ -16,6 +16,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from bms_runtime import save_runtime_from_snapshot
 from enroll_store import resolve_credentials
 
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
@@ -169,10 +170,16 @@ def loop():
             if uid:
                 hb_body["appliance_uid"] = uid
             hb = api("POST", "/api/v1/ingest/heartbeat/", hb_body)
+            # Cache enablement flags for enroll UI (never passwords)
+            try:
+                save_runtime_from_snapshot(hb if isinstance(hb, dict) else snap)
+            except Exception as cache_err:
+                print(f"runtime cache warn: {cache_err}", flush=True)
             house = (hb.get("household") or {}).get("slug")
+            reset_flag = bool(((hb.get("machine") or {}) if isinstance(hb, dict) else {}).get("allow_password_reset"))
             print(
                 f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
-                f"fail_closed={fail} platform={platform}",
+                f"fail_closed={fail} pwd_reset={reset_flag} platform={platform}",
                 flush=True,
             )
             if not fail:

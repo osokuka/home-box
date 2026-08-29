@@ -38,6 +38,9 @@ usb:
 webhook:
 zeroconf:
 
+# Local owner create / password reset for enroll UI (enroll-token gated)
+home_box_admin:
+
 frontend:
   themes: !include_dir_merge_named themes
 

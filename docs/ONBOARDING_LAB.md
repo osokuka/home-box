@@ -17,7 +17,10 @@ QR JSON shape (from operator `prepare-box` / enrollment QR):
           (or paste JSON / fields if no camera)
 3. Box:   platform-agent writes heartbeats with appliance_uid
 4. BMS:   waiting_for_device clears; handover → awaiting_takeover
-5. Staff: Walk owner through HA takeover (operator checklist — not in this repo)
+5. Box:   After BMS hello OK, **Home Box admin setup** on `:8099` (name/username/password — local only, never in QR)
+6. Staff: Mark `taken_over` when owner can sign in; use **Allow Home Box password reset** later for lockouts
+
+Passwords are never in the BMS QR. Full BMS contract: [`BMS_OWNER_AND_PASSWORD_HOOK.md`](./BMS_OWNER_AND_PASSWORD_HOOK.md).
 ```
 
 ## Services

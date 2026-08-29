@@ -13,6 +13,9 @@ Engine under the hood remains Home Assistant Core (Apache-2.0 — see `NOTICE`).
 | DNS (until VPN exists) | Keep `{slug}.ha.<domain>` / lab `*.ha.localhost` |
 | Tuya | **Tuya Local only** — never Core cloud `tuya` |
 | Attribution | `NOTICE` at repo root |
+| Credentials | Never in BMS QR; owner/password set on box; BMS only toggles `allow_password_reset` |
+
+Owner setup + password-reset hook contract (for BMS implementers): [`BMS_OWNER_AND_PASSWORD_HOOK.md`](./BMS_OWNER_AND_PASSWORD_HOOK.md).
 
 ## Phase status
 

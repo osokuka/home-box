@@ -33,9 +33,11 @@ Sidecar talks only to the operator repo APIs:
 | `BMS_ENROLL_TOKEN` | Env fallback if no enroll file |
 | `BMS_APPLIANCE_UID` | Env fallback unique ID (must match token) |
 | `BMS_HA_URL` | In-compose HA URL (`http://homeassistant:8123`) |
-| `BMS_HA_TOKEN` | Optional long-lived HA token — **GET only** |
+| `BMS_HA_TOKEN` | Optional long-lived HA token for agent status / MCP |
 | `BMS_INTERVAL` | Poll seconds (default 20) |
-| `BMS_CLIMATE_ENTITY` | Preferred climate entity (default `climate.heat_pump`) |
+| `BMS_CLIMATE_ENTITY` | Optional climate hint for agent status mapping |
+
+Owner credentials and password reset are **not** env vars. See [`BMS_OWNER_AND_PASSWORD_HOOK.md`](./BMS_OWNER_AND_PASSWORD_HOOK.md): QR has no passwords; BMS exposes `machine.allow_password_reset`; box UI on `:8099`.
 
 Lab enroll: see [ONBOARDING_LAB.md](ONBOARDING_LAB.md). Heartbeat includes `appliance_uid` when known.
 
