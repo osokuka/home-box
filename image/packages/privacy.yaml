@@ -1,9 +1,12 @@
 # Loaded as Home Assistant packages. Keep integrations local.
+# Use custom integration tuya_local only. Do not configure Core domain "tuya"
+# (cloud_push / Tuya–Smart Life).
 
 logger:
   default: warning
   logs:
     custom_components.tuya_local: warning
+    homeassistant.components.tuya: error
     homeassistant.components.cloud: error
     homeassistant.components.analytics: error
     homeassistant.components.my: error

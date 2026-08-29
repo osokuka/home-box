@@ -14,6 +14,8 @@ services:
       - ./image/configuration.yaml:/config/configuration.yaml:ro
       - ./image/packages:/config/packages:ro
       - ./image/www:/config/www:ro
+      # Product: Tuya Local from image (not Core cloud tuya).
+      - ./image/custom_components:/config/custom_components:ro
     # Same pattern as BMS for now: published HTTP. WireGuard is later.
     ports:
       - "8123:8123"

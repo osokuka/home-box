@@ -1,0 +1,26 @@
+#!/bin/sh
+# Seed Tuya Local into /config on first boot (named volumes).
+# Lab compose bind-mounts image/custom_components :ro — skip seed then.
+set -u
+
+SRC=/usr/share/home-box/custom_components/tuya_local
+DST=/config/custom_components/tuya_local
+
+if [ ! -d "${SRC}" ]; then
+  echo "home-box: no baked tuya_local at ${SRC}"
+  exit 0
+fi
+
+mkdir -p /config/custom_components 2>/dev/null || true
+
+# RO bind-mount of custom_components: do not seed.
+if ! touch /config/custom_components/.hb_write_test 2>/dev/null; then
+  echo "home-box: custom_components is read-only; using bind-mount / image"
+  exit 0
+fi
+rm -f /config/custom_components/.hb_write_test
+
+rm -rf "${DST}"
+cp -a "${SRC}" "${DST}"
+echo "home-box: installed tuya_local into /config/custom_components"
+exit 0

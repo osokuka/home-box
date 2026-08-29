@@ -1,0 +1,182 @@
+name: Heat pump
+# Local DPs reported by this WiFi module (tinytuya status). Tuya app rows that
+# are cloud-only (schedules, sharing, firmware) never appear here.
+entities:
+  - entity: climate
+    dps:
+      - id: 1
+        type: boolean
+        name: hvac_mode
+        mapping:
+          - dps_val: false
+            value: "off"
+          - dps_val: true
+            constraint: mode
+            conditions:
+              - dps_val: auto
+                value: heat_cool
+              - dps_val: cold
+                value: cool
+              - dps_val: hot
+                value: heat
+              - dps_val: wind
+                value: fan_only
+              - dps_val: wet
+                value: dry
+      - id: 2
+        type: string
+        name: mode
+        hidden: true
+      - id: 4
+        type: integer
+        name: temperature
+        unit: C
+        range:
+          min: 7
+          max: 35
+      - id: 16
+        type: integer
+        name: current_temperature
+        unit: C
+      - id: 25
+        type: integer
+        name: error_code
+  - entity: select
+    name: Mode
+    icon: "mdi:heat-pump"
+    dps:
+      - id: 2
+        type: string
+        name: option
+        mapping:
+          - dps_val: hot
+            value: Heat
+          - dps_val: cold
+            value: Cool
+          - dps_val: wind
+            value: Fan
+          - dps_val: wet
+            value: Dry
+          - dps_val: auto
+            value: Auto
+  - entity: switch
+    name: Sleep
+    icon: "mdi:power-sleep"
+    dps:
+      - id: 7
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Quiet
+    icon: "mdi:volume-off"
+    dps:
+      - id: 9
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Auxiliary electric heat
+    icon: "mdi:heating-coil"
+    dps:
+      - id: 101
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Function 27
+    dps:
+      - id: 27
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Function 28
+    dps:
+      - id: 28
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Function 29
+    dps:
+      - id: 29
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Function 30
+    dps:
+      - id: 30
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Function 32
+    dps:
+      - id: 32
+        type: boolean
+        name: switch
+        optional: true
+  - entity: switch
+    name: Function 33
+    dps:
+      - id: 33
+        type: boolean
+        name: switch
+        optional: true
+  - entity: sensor
+    name: Indoor temperature
+    class: temperature
+    dps:
+      - id: 16
+        type: integer
+        name: sensor
+        unit: C
+        optional: true
+  - entity: sensor
+    name: Coil temperature
+    class: temperature
+    dps:
+      - id: 23
+        type: integer
+        name: sensor
+        unit: C
+        optional: true
+  - entity: sensor
+    name: Discharge temperature
+    class: temperature
+    dps:
+      - id: 24
+        type: integer
+        name: sensor
+        unit: C
+        optional: true
+  - entity: sensor
+    name: Outdoor temperature
+    class: temperature
+    dps:
+      - id: 26
+        type: integer
+        name: sensor
+        unit: C
+        optional: true
+  - entity: binary_sensor
+    class: problem
+    name: Fault
+    icon: "mdi:alert-circle"
+    dps:
+      - id: 25
+        type: integer
+        name: sensor
+        mapping:
+          - dps_val: 0
+            value: false
+          - value: true
+  - entity: sensor
+    name: Fault code
+    icon: "mdi:alert-circle-outline"
+    dps:
+      - id: 25
+        type: integer
+        name: sensor

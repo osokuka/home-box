@@ -13,5 +13,9 @@ config/tts/
 config/blueprints/
 config/home-assistant.log*
 config/.cloud/
+# Runtime copy; product component lives in image/custom_components/
+config/custom_components/
 tuya/tinytuya.json
 tuya/lan-routes.json
+**/__pycache__/
+*.pyc

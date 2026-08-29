@@ -28,7 +28,8 @@ Our private docs and (later) code stay under **[osokuka](https://github.com/osok
 
 ## Custom component (third party, not HA org)
 
-- [make-all/tuya-local](https://github.com/make-all/tuya-local) — local Tuya; Python deps baked into our image (`tinytuya`).
+- [make-all/tuya-local](https://github.com/make-all/tuya-local) — **Tuya Local** only; Python deps baked into our image (`tinytuya`).
+- Core integration **`tuya`** (`cloud_push`) is **not** used and must not be configured on Home Box.
 
 ## Rebrand implications by repo
 

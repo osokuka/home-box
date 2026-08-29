@@ -11,9 +11,11 @@ You set up **devices on the house box**. You do not assign HVAC companies. You d
 
 ## Add devices
 
-1. Owner (or you under the bootstrap login, then hand over) opens HA.
-2. Pair locally. For Tuya Wi‑Fi: Tuya Local **manual** IP + device id + local key. Close Smart Life first.
+1. Owner (or you under the bootstrap login, then hand over) opens Home Box.
+2. Pair locally. For Tuya Wi‑Fi: add **Tuya Local** (not Core “Tuya”). Use **manual** IP + device id + local key. Close Smart Life first.
 3. Heat pump: use **Heat**, not Cool.
+
+Do **not** install or sign in to the official Home Assistant **Tuya** integration (cloud). Home Box only supports **Tuya Local**.
 
 ## Company troubleshooting
 
