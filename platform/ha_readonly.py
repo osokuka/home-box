@@ -1,4 +1,9 @@
-"""Read-only Home Assistant helpers for Home Box MCP (GET only — never call services)."""
+"""Home Assistant helpers for Home Box MCP — live discovery from each box.
+
+Entity/service catalogs come from this HA instance at call time.
+Never assume a fixed device set (no baked-in heat_pump / product SKU map).
+GET for reads; service POSTs live in ha_control.py only.
+"""
 
 from __future__ import annotations
 
@@ -13,34 +18,18 @@ from typing import Any
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
 HA_TOKEN = os.environ.get("BMS_HA_TOKEN", "").strip()
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
-CLIMATE_ENTITY = os.environ.get("BMS_CLIMATE_ENTITY", "climate.heat_pump")
+# Optional hint only — never required; empty = no default climate.
+CLIMATE_ENTITY = os.environ.get("BMS_CLIMATE_ENTITY", "").strip()
 
-ALLOWED_DOMAINS = frozenset(
+# Domains never exposed as entities to agents (noise / internal).
+DENIED_ENTITY_DOMAINS = frozenset(
     {
-        "climate",
-        "sensor",
-        "binary_sensor",
-        "switch",
-        "select",
-        "number",
-        "cover",
-        "light",
-        "fan",
-        "lock",
-        "water_heater",
-        "humidifier",
-        "weather",
-        "person",
-        "zone",
-        "sun",
-        "media_player",
-        "vacuum",
-        "alarm_control_panel",
-        "valve",
-        "input_boolean",
-        "input_number",
-        "input_select",
-        "input_text",
+        "persistent_notification",
+        "conversation",
+        "tts",
+        "stt",
+        "assist_satellite",
+        "ai_task",
     }
 )
 
@@ -49,7 +38,6 @@ ENERGY_HINTS = re.compile(
     re.I,
 )
 
-# Attribute keys that look like secrets — never return to agents.
 REDACT_ATTR_KEYS = frozenset(
     {
         "access_token",
@@ -95,11 +83,17 @@ def read_storage(name: str) -> Any | None:
         return None
 
 
+def domain_allowed_for_entity(domain: str) -> bool:
+    return bool(domain) and domain not in DENIED_ENTITY_DOMAINS
+
+
 def _safe_attrs(attrs: dict) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k, v in attrs.items():
         lk = str(k).lower()
-        if lk in REDACT_ATTR_KEYS or any(x in lk for x in ("password", "secret", "token", "local_key")):
+        if lk in REDACT_ATTR_KEYS or any(
+            x in lk for x in ("password", "secret", "token", "local_key")
+        ):
             out[k] = "[redacted]"
         else:
             out[k] = v
@@ -161,7 +155,7 @@ def box_status() -> dict[str, Any]:
         "location": location,
         "detail": detail,
         "commands_allowed": False,
-        "note": "MCP tools are read-only. No device control via AI agents.",
+        "note": "Entity/service catalogs are discovered live from this box.",
     }
 
 
@@ -169,7 +163,6 @@ def get_ha_config() -> dict[str, Any]:
     cfg = ha_get("/api/config")
     if not isinstance(cfg, dict):
         return {"error": "unexpected config payload"}
-    # Drop internals that are not useful / sensitive for agents.
     keep = (
         "version",
         "location_name",
@@ -187,7 +180,6 @@ def get_ha_config() -> dict[str, Any]:
     out = {k: cfg.get(k) for k in keep if k in cfg}
     comps = out.get("components")
     if isinstance(comps, list):
-        # Cap size — agents only need to know notable integrations exist.
         interesting = sorted(
             c
             for c in comps
@@ -209,17 +201,36 @@ def get_ha_config() -> dict[str, Any]:
         out["components_sample"] = interesting[:80]
         out["components_count"] = len(comps)
         del out["components"]
-    out["commands_allowed"] = False
     return out
 
 
-def list_ha_services(domain: str | None = None) -> dict[str, Any]:
-    """Catalog only — does not execute any service."""
+def _simplify_field(meta: Any) -> dict[str, Any]:
+    """Shrink HA service field schema for agents."""
+    if not isinstance(meta, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key in (
+        "name",
+        "description",
+        "required",
+        "example",
+        "default",
+        "selector",
+        "filter",
+    ):
+        if key in meta and meta[key] is not None:
+            out[key] = meta[key]
+    # fields may nest under "fields" in older shapes — ignore
+    return out
+
+
+def fetch_services_catalog(domain: str | None = None) -> list[dict[str, Any]]:
+    """Live /api/services blocks, optionally filtered by domain."""
     services = ha_get("/api/services")
     if not isinstance(services, list):
-        return {"count": 0, "domains": [], "note": "unexpected services payload"}
+        return []
     want = (domain or "").strip().lower() or None
-    domains = []
+    out: list[dict[str, Any]] = []
     for block in services:
         if not isinstance(block, dict):
             continue
@@ -227,20 +238,78 @@ def list_ha_services(domain: str | None = None) -> dict[str, Any]:
         if want and dom != want:
             continue
         svc_map = block.get("services") if isinstance(block.get("services"), dict) else {}
-        domains.append(
+        services_detail = []
+        for name, meta in sorted(svc_map.items()):
+            entry: dict[str, Any] = {"service": name}
+            if isinstance(meta, dict):
+                if meta.get("name"):
+                    entry["name"] = meta.get("name")
+                if meta.get("description"):
+                    entry["description"] = meta.get("description")
+                fields = meta.get("fields")
+                if isinstance(fields, dict):
+                    entry["fields"] = {
+                        fk: _simplify_field(fv) for fk, fv in fields.items()
+                    }
+                target = meta.get("target")
+                if target is not None:
+                    entry["target"] = target
+            services_detail.append(entry)
+        out.append(
             {
                 "domain": dom,
-                "services": sorted(svc_map.keys()),
-                "service_count": len(svc_map),
+                "services": [s["service"] for s in services_detail],
+                "service_count": len(services_detail),
+                "services_detail": services_detail,
             }
         )
-    domains.sort(key=lambda x: x["domain"])
+    out.sort(key=lambda x: x["domain"])
+    return out
+
+
+def list_ha_services(domain: str | None = None, include_fields: bool = True) -> dict[str, Any]:
+    """Catalog from this box — does not execute."""
+    domains = fetch_services_catalog(domain)
+    if not include_fields:
+        for d in domains:
+            d.pop("services_detail", None)
     return {
         "count": len(domains),
         "domains": domains,
-        "commands_allowed": False,
-        "note": "Catalog only. Home Box MCP cannot call these services.",
+        "source": "live:/api/services",
+        "note": "Catalog for this Home Box only. Use list_control_points before calling.",
     }
+
+
+def describe_service(domain: str, service: str) -> dict[str, Any]:
+    domain = (domain or "").strip().lower()
+    service = (service or "").strip().lower()
+    if not domain or not service:
+        raise RuntimeError("domain and service are required")
+    for block in fetch_services_catalog(domain):
+        for detail in block.get("services_detail") or []:
+            if detail.get("service") == service:
+                return {
+                    "domain": domain,
+                    "service": service,
+                    "exists": True,
+                    **{k: v for k, v in detail.items() if k != "service"},
+                }
+    return {
+        "domain": domain,
+        "service": service,
+        "exists": False,
+        "note": "Not registered on this Home Box.",
+    }
+
+
+def service_exists(domain: str, service: str) -> bool:
+    domain = (domain or "").strip().lower()
+    service = (service or "").strip().lower()
+    for block in fetch_services_catalog(domain):
+        if service in (block.get("services") or []):
+            return True
+    return False
 
 
 def list_devices(domain: str | None = None) -> list[dict[str, Any]]:
@@ -253,7 +322,7 @@ def list_devices(domain: str | None = None) -> list[dict[str, Any]]:
         if "." not in eid:
             continue
         dom = eid.split(".", 1)[0]
-        if dom not in ALLOWED_DOMAINS:
+        if not domain_allowed_for_entity(dom):
             continue
         if want and dom != want:
             continue
@@ -262,12 +331,31 @@ def list_devices(domain: str | None = None) -> list[dict[str, Any]]:
     return out
 
 
+def list_domains_present() -> list[dict[str, Any]]:
+    """Which entity domains exist on this box (dynamic)."""
+    counts: dict[str, int] = {}
+    for st in _all_states():
+        if not isinstance(st, dict):
+            continue
+        eid = str(st.get("entity_id") or "")
+        if "." not in eid:
+            continue
+        dom = eid.split(".", 1)[0]
+        if not domain_allowed_for_entity(dom):
+            continue
+        counts[dom] = counts.get(dom, 0) + 1
+    return [
+        {"domain": d, "entity_count": counts[d]}
+        for d in sorted(counts.keys())
+    ]
+
+
 def get_entity(entity_id: str) -> dict[str, Any]:
     eid = (entity_id or "").strip()
     if not eid or "." not in eid:
-        raise RuntimeError("entity_id required, e.g. climate.heat_pump")
+        raise RuntimeError("entity_id required, e.g. climate.living_room")
     dom = eid.split(".", 1)[0]
-    if dom not in ALLOWED_DOMAINS:
+    if not domain_allowed_for_entity(dom):
         raise RuntimeError(f"domain '{dom}' is not exposed to MCP agents")
     st = ha_get(f"/api/states/{eid}")
     if not isinstance(st, dict):
@@ -301,7 +389,7 @@ def search_entities(query: str, domain: str = "") -> list[dict[str, Any]]:
         if "." not in eid:
             continue
         dom = eid.split(".", 1)[0]
-        if dom not in ALLOWED_DOMAINS:
+        if not domain_allowed_for_entity(dom):
             continue
         if want and dom != want:
             continue
@@ -318,7 +406,14 @@ def _by_domain(domain: str) -> list[dict[str, Any]]:
 
 
 def get_climate(entity_id: str | None = None) -> list[dict[str, Any]]:
-    target = (entity_id or CLIMATE_ENTITY or "").strip()
+    """All climate entities, one entity, or optional BMS_CLIMATE_ENTITY hint."""
+    raw = (entity_id or "").strip()
+    if raw == "*":
+        target = ""
+    elif raw:
+        target = raw
+    else:
+        target = CLIMATE_ENTITY  # may be empty → all climates
     rows: list[dict[str, Any]] = []
     for st in _all_states():
         if not isinstance(st, dict):
@@ -326,7 +421,7 @@ def get_climate(entity_id: str | None = None) -> list[dict[str, Any]]:
         eid = str(st.get("entity_id") or "")
         if not eid.startswith("climate."):
             continue
-        if target and eid != target and target != "*":
+        if target and eid != target:
             continue
         attrs = st.get("attributes") if isinstance(st.get("attributes"), dict) else {}
         rows.append(
@@ -372,7 +467,7 @@ def get_energy_snapshot() -> dict[str, Any]:
     return {
         "count": len(sensors),
         "sensors": sensors[:150],
-        "note": "Heuristic match on energy/power-related sensors. Read-only.",
+        "note": "Heuristic match on energy/power-related sensors on this box.",
     }
 
 
@@ -436,7 +531,6 @@ def get_people() -> list[dict[str, Any]]:
                 "state": st.get("state"),
                 "friendly_name": attrs.get("friendly_name"),
                 "source": attrs.get("source"),
-                # Do not expose user_id linkage details beyond presence.
             }
         )
     return rows

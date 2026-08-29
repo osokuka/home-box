@@ -104,7 +104,7 @@ services:
     networks:
       - ha
 
-  # Read-only MCP for OpenClaw / AI agents (no device commands)
+  # MCP for OpenClaw — live discovery + deny-listed device control
   home-box-mcp:
     build:
       context: ./platform
@@ -117,15 +117,19 @@ services:
       TZ: ${TZ:-Europe/Amsterdam}
       BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
       BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
-      BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-climate.heat_pump}
+      # Optional hint only — MCP tools do not require a default climate entity
+      BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-}
       BMS_MCP_HOST: "0.0.0.0"
       BMS_MCP_PORT: "8100"
+      # Set to 0 for status-only (no call_service / turn_*)
+      HOME_BOX_MCP_ALLOW_CONTROL: ${HOME_BOX_MCP_ALLOW_CONTROL:-1}
       HA_CONFIG: /config
     ports:
       - "8100:8100"
     volumes:
       - ./platform/mcp_server.py:/app/mcp_server.py:ro
       - ./platform/ha_readonly.py:/app/ha_readonly.py:ro
+      - ./platform/ha_control.py:/app/ha_control.py:ro
       - ./config:/config:ro
     command: ["python", "-u", "/app/mcp_server.py"]
     depends_on:

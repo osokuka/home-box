@@ -1,166 +1,74 @@
 # Home Box MCP — tools, consumption, utilization
 
-Read-only MCP for **OpenClaw** and similar agents.  
-**No device control** — agents may inspect and explain, never call HA services through this server.
+MCP for **OpenClaw** and similar agents. Every Home Box has a different IoT mix — **entity and service catalogs are discovered live** from that box’s Home Assistant. There is no fixed device map.
 
 | | |
 | --- | --- |
 | Endpoint | `http://127.0.0.1:8100/sse` (lab) |
 | Transport | MCP SSE |
-| Auth | Lab open on bind — do not expose to WAN |
-| Token | `BMS_HA_TOKEN` long-lived HA token on `home-box-mcp` |
+| Token | `BMS_HA_TOKEN` long-lived HA token |
+| Control gate | `HOME_BOX_MCP_ALLOW_CONTROL=1` (default in compose) |
 
-BYO LLM stays in the **agent** (OpenClaw model config). This server only supplies house context.
+BYO LLM stays in the **agent**. This server exposes house context + guarded local HA actions only — never Tuya/OEM clouds.
 
 ---
 
-## How agents should consume tools
+## Agent loop (required)
 
-Typical agent loop:
+1. `get_box_status` — online? `commands_allowed`?
+2. `list_domains` / `search_entities` / `list_devices` — what exists **here**
+3. `list_control_points` — what can be called for those entities
+4. `describe_service` — required fields for that service on this box
+5. `call_service` or convenience helper → check `verify` / `get_entity`
 
-1. `get_box_status` — is the box online?
-2. `list_config_entries` / `get_areas` / `get_devices_registry` — what exists?
-3. `search_entities` or domain tools — find the thing the user asked about
-4. `get_entity` / `get_climate` — precise answer
-5. `list_ha_services` — only to explain *what HA could do*; never claim you did it
+Never invent `entity_id` values. Never assume `climate.heat_pump` or any lab name exists on a customer box.
 
-Always tell the user that changes require a human in the Home Box UI (or a future guarded control API).
+---
+
+## Safety model
+
+- Control off unless `HOME_BOX_MCP_ALLOW_CONTROL` is truthy
+- Callable = **live** `/api/services` **minus** deny list (hassio, backup, recorder, shell/rest/python_script, host restart/stop, …)
+- Entity domains use a small **deny** list (noise), not a product allowlist
+- Control calls log `home-box-mcp CONTROL …`
+- Status-only: `HOME_BOX_MCP_ALLOW_CONTROL=0`
 
 ---
 
 ## Tool reference
 
-### System
+### Discovery
 
-#### `get_box_status`
-| | |
+| Tool | Consume / utilize |
 | --- | --- |
-| **Returns** | Product name, HA reachability, version, location/timezone snippet, `commands_allowed: false` |
-| **Consume** | Call first on every session or when the user asks “is the house online?” |
-| **Utilize** | Health checks; refuse deep queries if `ha_reachable` is false; explain token misconfig from `detail` |
+| `get_box_status` | Session start; read `commands_allowed` |
+| `list_domains` | Inventory of entity domains + counts on this box |
+| `list_ha_services` | Full live service catalog + field schemas |
+| `describe_service` | One service’s fields before `call_service` |
+| `list_control_points` | Entities × callable services (filtered by domain/query) |
+| `get_control_capabilities` | Gate + deny lists + sample executable services |
+| `search_entities` / `list_devices` / `get_entity` | Resolve NL → entity_id → state |
+| `list_config_entries` / `get_devices_registry` / `get_areas` | Integrations, hardware, rooms |
+| Domain getters (`get_climate`, `get_lights`, …) | Convenience reads; empty climate = **all** `climate.*` on this box |
 
-#### `get_ha_config`
-| | |
+### Control
+
+| Tool | Notes |
 | --- | --- |
-| **Returns** | Sanitized config: units, currency, language, URLs, sample of loaded components |
-| **Consume** | When answering about °C/°F, timezone, or which integrations appear loaded |
-| **Utilize** | Localize answers (“temps are Celsius”); confirm Assist/energy stack presence without dumping full component list |
-
-#### `list_ha_services` (`domain` optional)
-| | |
-| --- | --- |
-| **Returns** | Catalog of domain → service **names** only |
-| **Consume** | “What can Home Assistant do for climate/lights?” documentation questions |
-| **Utilize** | Explain capabilities; draft *suggested* UI steps for a human. **Never** execute. `commands_allowed` is always false |
-
----
-
-### Entities (generic)
-
-#### `list_devices` (`domain` optional)
-| | |
-| --- | --- |
-| **Returns** | Summaries: `entity_id`, state, friendly name, domain |
-| **Consume** | Inventory / “what’s in the house?” |
-| **Utilize** | Build an overview; pick candidates for `get_entity` |
-
-#### `get_entity` (`entity_id` required)
-| | |
-| --- | --- |
-| **Returns** | One entity with safe attributes (secrets redacted) |
-| **Consume** | Precise “what is X doing?” |
-| **Utilize** | Cite state + key attributes (temp, battery, fault). Rejects domains outside the allowlist |
-
-#### `get_entities` (`entity_ids` CSV and/or `domain`)
-| | |
-| --- | --- |
-| **Returns** | Batch of entity payloads |
-| **Consume** | Compare several devices in one turn |
-| **Utilize** | Dashboards-in-prose; multi-room summaries |
-
-#### `search_entities` (`query`, optional `domain`)
-| | |
-| --- | --- |
-| **Returns** | Up to 200 matches by id/name substring |
-| **Consume** | User said “heat pump” / “fault” without knowing the entity_id |
-| **Utilize** | Resolve natural language → entity_id, then `get_entity` |
-
----
-
-### By domain (status only)
-
-#### `get_climate` (`entity_id` optional, `*` = all)
-| | |
-| --- | --- |
-| **Returns** | Mode, current/setpoint temps, hvac_action |
-| **Consume** | HVAC / comfort questions |
-| **Utilize** | Explain heating status for owners or (via BMS narrative) companies — still no setpoint changes |
-
-#### `get_sensors` / `get_binary_sensors`
-| | |
-| --- | --- |
-| **Returns** | All `sensor.*` / `binary_sensor.*` summaries |
-| **Consume** | Temps, humidity, faults, door/window, motion |
-| **Utilize** | Anomaly explainers (“fault binary is on”); environment briefings |
-
-#### `get_switches` / `get_lights` / `get_covers` / `get_locks`
-| | |
-| --- | --- |
-| **Returns** | On/off or position **state** only |
-| **Consume** | “Are the lights on?” / “Is the lock locked?” |
-| **Utilize** | Presence/security *status* reports. Cannot toggle, open, or unlock |
-
-#### `get_energy_snapshot`
-| | |
-| --- | --- |
-| **Returns** | Heuristic list of energy/power/gas/water-related sensors |
-| **Consume** | Energy / bill / solar questions when those sensors exist |
-| **Utilize** | Rough consumption narrative; say when the list is empty |
-
----
-
-### Structure & people
-
-#### `get_areas`
-| | |
-| --- | --- |
-| **Returns** | Rooms/areas (id, name, aliases) |
-| **Consume** | “What rooms are defined?” |
-| **Utilize** | Map devices to places in answers; guide takeover naming |
-
-#### `get_devices_registry`
-| | |
-| --- | --- |
-| **Returns** | Device registry: name, manufacturer, model, area |
-| **Consume** | Hardware inventory (“what Tuya devices are paired?”) |
-| **Utilize** | Support / technician briefs; distinguish device vs entity |
-
-#### `get_people`
-| | |
-| --- | --- |
-| **Returns** | `person.*` home/not_home style states |
-| **Consume** | Presence questions |
-| **Utilize** | Context for automations *explanations* only — no tracking abuse; no account secrets |
-
-#### `list_config_entries`
-| | |
-| --- | --- |
-| **Returns** | Integration domain + title (+ disabled flag) |
-| **Consume** | “Is Tuya Local installed? Is cloud Tuya present?” |
-| **Utilize** | Enforce product narrative: prefer `tuya_local`, flag unexpected cloud `tuya` |
+| `call_service(domain, service, entity_id?, data_json?)` | Primary write path; must exist live and not be denied |
+| `turn_on` / `turn_off` / `toggle` | `entity_id` required |
+| `climate_set_temperature` / `climate_set_hvac_mode` | **`entity_id` required** (no default) |
+| `cover_open` / `cover_close` / `lock_lock` / `lock_unlock` | `entity_id` required |
 
 ---
 
 ## OpenClaw wiring
 
 ```json5
-// ~/.openclaw/openclaw.json (excerpt)
 {
   mcp: {
     servers: {
-      "home-box": {
-        url: "http://127.0.0.1:8100/sse",
-      },
+      "home-box": { url: "http://127.0.0.1:8100/sse" },
     },
   },
 }
@@ -171,22 +79,23 @@ openclaw mcp probe home-box
 openclaw mcp tools
 ```
 
-Allow `bundle-mcp` / sandbox tool policy per OpenClaw docs if tools are filtered.
-
 ## Compose
 
 ```bash
 cd C:\AI\ha
-docker compose up -d home-box-mcp
+docker compose up -d --force-recreate home-box-mcp
 ```
 
 ```env
 BMS_HA_TOKEN=...long-lived-token...
+HOME_BOX_MCP_ALLOW_CONTROL=1
+# optional hint only — never required by MCP tools:
+# BMS_CLIMATE_ENTITY=climate.some_name
 ```
 
 ## Non-negotiables
 
-- Query / explain only — MCP never calls `/api/services`
-- No OEM / Tuya cloud as AI path
-- Do not publish `:8100` on the public internet without auth + VPN (later)
-- Secrets in entity attributes are redacted when possible
+- Discover per box; do not hardcode customer entity ids in agents
+- Local HA services only; no OEM cloud AI path
+- No restart / host power / backup / shell via MCP
+- Do not publish `:8100` to WAN without auth + VPN
