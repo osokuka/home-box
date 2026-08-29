@@ -1,4 +1,4 @@
-# Home Box branding: default theme after start.
+# Home Box branding: default theme after start + surface name via /local/home-box-brand.js
 
 automation:
   - id: home_box_default_theme
