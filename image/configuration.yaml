@@ -45,11 +45,17 @@ automation: !include automations.yaml
 script: !include scripts.yaml
 scene: !include scenes.yaml
 
-# Owner-only: how THEY create a troubleshooting login. We never set that password.
+# Owner panels (product copy). WireGuard remote access is later.
 panel_custom:
-  - name: bms-company-access
+  - name: home-box-getting-started
+    sidebar_title: Getting started
+    sidebar_icon: mdi:home-variant
+    url_path: getting-started
+    module_url: /local/home-box-getting-started.js
+    require_admin: true
+  - name: home-box-company-access
     sidebar_title: Company access
     sidebar_icon: mdi:account-hard-hat
     url_path: company-access
-    module_url: /local/bms-company-access.js
+    module_url: /local/home-box-company-access.js
     require_admin: true

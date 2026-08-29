@@ -210,20 +210,14 @@ def clear_queue() -> None:
 
 
 def _ws_apply_device(device: dict) -> dict:
-    """Best-effort create tuya_local entry via HA websocket. Requires websockets pkg or stdlib hack.
-
-    Uses urllib-free approach: HA REST cannot create flows easily; we shell out to a tiny
-    websocket client implemented with the `websocket-client` optional path — prefer stdlib.
-    """
-    # Lazy import: Alpine image may not have websocket-client; implement with asyncio + websockets
-    # is heavy. Use a minimal RFC6455 client via `websocket` from PyPI only if present.
+    """Best-effort create tuya_local entry via HA websocket."""
     try:
         import websocket  # type: ignore
     except ImportError:
         return {
             "device_id": device.get("device_id"),
             "status": "skipped",
-            "detail": "websocket-client not installed; use manual add or rebuild import image",
+            "detail": "websocket-client not installed; rebuild home-box-tuya-import image",
         }
 
     if not HA_TOKEN:
@@ -242,7 +236,9 @@ def _ws_apply_device(device: dict) -> dict:
         return msg_id
 
     try:
-        ws = websocket.create_connection(HA_WS, timeout=30, sslopt={"cert_reqs": ssl.CERT_NONE})
+        ws = websocket.create_connection(
+            HA_WS, timeout=45, sslopt={"cert_reqs": ssl.CERT_NONE}
+        )
         hello = json.loads(ws.recv())
         if hello.get("type") != "auth_required":
             results["detail"] = "unexpected hello"
@@ -251,24 +247,41 @@ def _ws_apply_device(device: dict) -> dict:
         ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
         auth = json.loads(ws.recv())
         if auth.get("type") != "auth_ok":
-            results["detail"] = "HA auth failed"
+            results["detail"] = "HA auth failed — check BMS_HA_TOKEN"
             ws.close()
             return results
 
         def call(payload: dict) -> dict:
             pid = next_id()
-            body = {"id": pid, **payload}
-            ws.send(json.dumps(body))
+            ws.send(json.dumps({"id": pid, **payload}))
             while True:
                 raw = json.loads(ws.recv())
+                if raw.get("type") == "event":
+                    continue
                 if raw.get("id") == pid:
                     return raw
 
+        # Skip if already configured
+        entries = call({"type": "config_entries/get"})
+        if entries.get("success"):
+            for ent in entries.get("result") or []:
+                if ent.get("domain") != "tuya_local":
+                    continue
+                data = ent.get("data") or {}
+                if str(data.get("device_id") or "") == str(device.get("device_id")):
+                    results["status"] = "exists"
+                    results["detail"] = "already configured"
+                    ws.close()
+                    return results
+
         created = call({"type": "config_entries/flow/create", "handler": "tuya_local"})
         if not created.get("success"):
-            # Older HA: type config_entries/flow with handler only
             created = call(
-                {"type": "config_entries/flow", "handler": "tuya_local", "show_advanced_options": False}
+                {
+                    "type": "config_entries/flow",
+                    "handler": "tuya_local",
+                    "show_advanced_options": False,
+                }
             )
         if not created.get("success"):
             results["detail"] = str(created.get("error") or created)[:200]
@@ -277,16 +290,29 @@ def _ws_apply_device(device: dict) -> dict:
         flow = created.get("result") or {}
         flow_id = flow.get("flow_id")
 
-        step = call(
-            {
-                "type": "config_entries/flow",
-                "flow_id": flow_id,
-                "handler": "tuya_local",
-                "data": {"setup_mode": "manual"},
-            }
-        )
-        flow = (step.get("result") or {}) if step.get("success") else {}
+        def progress(data: dict) -> dict:
+            return call(
+                {
+                    "type": "config_entries/flow",
+                    "flow_id": flow_id,
+                    "handler": "tuya_local",
+                    "data": data,
+                }
+            )
+
+        step = progress({"setup_mode": "manual"})
+        if not step.get("success"):
+            results["detail"] = "manual mode step failed"
+            ws.close()
+            return results
+        flow = step.get("result") or {}
         flow_id = flow.get("flow_id") or flow_id
+        if flow.get("type") == "abort":
+            reason = flow.get("reason") or "aborted"
+            results["status"] = "exists" if "already" in reason else "error"
+            results["detail"] = reason
+            ws.close()
+            return results
 
         proto = device.get("protocol_version") or "auto"
         local_data = {
@@ -296,20 +322,19 @@ def _ws_apply_device(device: dict) -> dict:
             "protocol_version": str(proto),
             "poll_only": bool(device.get("poll_only")),
         }
-        step = call(
-            {
-                "type": "config_entries/flow",
-                "flow_id": flow_id,
-                "handler": "tuya_local",
-                "data": local_data,
-            }
-        )
+        step = progress(local_data)
         if not step.get("success"):
-            results["detail"] = "local step failed (device offline or bad key?)"
+            results["detail"] = "local step failed (device offline, wrong key, or LAN blocked)"
             ws.close()
             return results
         flow = step.get("result") or {}
         flow_id = flow.get("flow_id") or flow_id
+        if flow.get("type") == "abort":
+            reason = flow.get("reason") or "aborted"
+            results["status"] = "exists" if "already" in reason else "error"
+            results["detail"] = reason
+            ws.close()
+            return results
         step_id = flow.get("step_id")
 
         if step_id in ("select_type", "select_type_auto_detected"):
@@ -317,53 +342,31 @@ def _ws_apply_device(device: dict) -> dict:
             if not dtype:
                 results["status"] = "needs_manual"
                 results["detail"] = "connected; pick type in HA UI (CSV type empty)"
-                # abandon flow
                 ws.close()
                 return results
-            # Prefer exact config type; compound keys also accepted by flow
             type_value = dtype if "||" in dtype else f"{dtype}|||"
-            step = call(
-                {
-                    "type": "config_entries/flow",
-                    "flow_id": flow_id,
-                    "handler": "tuya_local",
-                    "data": {"type": type_value},
-                }
-            )
+            step = progress({"type": type_value})
             if not step.get("success"):
-                # retry plain type
-                step = call(
-                    {
-                        "type": "config_entries/flow",
-                        "flow_id": flow_id,
-                        "handler": "tuya_local",
-                        "data": {"type": dtype},
-                    }
-                )
-            flow = (step.get("result") or {}) if step.get("success") else {}
+                step = progress({"type": dtype})
+            if not step.get("success"):
+                results["detail"] = "select_type failed — check CSV type matches a Tuya Local profile"
+                ws.close()
+                return results
+            flow = step.get("result") or {}
             flow_id = flow.get("flow_id") or flow_id
             step_id = flow.get("step_id")
 
         if step_id == "choose_entities":
-            step = call(
-                {
-                    "type": "config_entries/flow",
-                    "flow_id": flow_id,
-                    "handler": "tuya_local",
-                    "data": {"name": device.get("name") or device["device_id"]},
-                }
-            )
-            if step.get("success") and (step.get("result") or {}).get("type") == "create_entry":
-                results["status"] = "created"
-                results["detail"] = "ok"
-            elif step.get("success") and not (step.get("result") or {}).get("step_id"):
+            step = progress({"name": device.get("name") or device["device_id"]})
+            flow = (step.get("result") or {}) if step.get("success") else {}
+            if flow.get("type") == "create_entry" or (
+                step.get("success") and not flow.get("step_id")
+            ):
                 results["status"] = "created"
                 results["detail"] = "ok"
             else:
                 results["detail"] = "choose_entities failed"
-        elif (flow.get("type") == "create_entry") or (
-            step.get("success") and (step.get("result") or {}).get("type") == "create_entry"
-        ):
+        elif flow.get("type") == "create_entry":
             results["status"] = "created"
             results["detail"] = "ok"
         else:

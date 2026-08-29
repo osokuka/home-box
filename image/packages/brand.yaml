@@ -1,0 +1,12 @@
+# Home Box branding: default theme after start.
+
+automation:
+  - id: home_box_default_theme
+    alias: Home Box default theme
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - service: frontend.set_theme
+        data:
+          name: Home Box

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 64" role="img" aria-label="Home Box">
+  <rect width="240" height="64" fill="#eef3ef"/>
+  <rect x="8" y="12" width="40" height="40" rx="4" fill="#2f6f4e"/>
+  <path d="M18 38 V28 L28 20 L38 28 V38 H31 V31 H25 V38 Z" fill="#f7faf8"/>
+  <text x="60" y="40" font-family="Segoe UI, system-ui, sans-serif" font-size="28" font-weight="650" fill="#1a1f1c">Home Box</text>
+</svg>

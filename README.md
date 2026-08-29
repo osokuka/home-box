@@ -37,6 +37,7 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 
 ## Status
 
-- Lab stack: Docker Compose (HA Core + platform-agent + enroll-ui + LAN privacy router)
-- Ingest: subscription / heartbeat / read-only device status
-- Product name frozen: **Home Box** (`home-box`) — see REBRAND.md for remaining work
+- Lab stack: HA Core + agent + enroll (:8099) + Tuya import (:8098) + privacy LAN router
+- Product name: **Home Box** — see `NOTICE` and [docs/REBRAND.md](docs/REBRAND.md)
+- Tuya: **Local only** via CSV/manual — [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md)
+- WireGuard / production relay: **not in this pass**

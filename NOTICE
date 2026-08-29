@@ -1,0 +1,25 @@
+Home Box
+========
+
+Copyright for Home Box packaging, agents, and documentation:
+Copyright (c) 2026 Home Box contributors (osokuka).
+
+This product includes Home Assistant Core and related components:
+
+  Home Assistant Core
+  Copyright (c) Home Assistant contributors
+  Licensed under the Apache License, Version 2.0
+  https://github.com/home-assistant/core
+  https://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+Tuya Local custom integration:
+  https://github.com/make-all/tuya-local
+  (third-party; see that project for license terms)
+
+Home Box is not affiliated with or endorsed by the Home Assistant project
+or Nabu Casa. "Home Assistant" is used only to identify the open-source
+engine under the hood.

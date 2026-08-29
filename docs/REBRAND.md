@@ -2,71 +2,41 @@
 
 **Frozen product name:** **Home Box**  
 **Slug:** `home-box`  
-Engine under the hood remains Home Assistant Core (Apache-2.0 attribution required). Customer-facing surfaces use Home Box, not “Home Assistant” as the product name.
+Engine under the hood remains Home Assistant Core (Apache-2.0 — see `NOTICE`).
 
-Official upstream org: [github.com/home-assistant](https://github.com/home-assistant) — we **consume** images/APIs; we do **not** push or fork into that org. Our GitHub home is **osokuka**.
+## Decisions locked (no WireGuard required)
 
-## Why rebrand
+| Decision | Value |
+| --- | --- |
+| Product name | Home Box |
+| Slug | `home-box` |
+| DNS (until VPN exists) | Keep `{slug}.ha.<domain>` / lab `*.ha.localhost` |
+| Tuya | **Tuya Local only** — never Core cloud `tuya` |
+| Attribution | `NOTICE` at repo root |
 
-- Operator platform is BMS-branded (`osokuka/home_automation`).
-- Box UI still shows Home Assistant chrome, domains, and default copy.
-- Identifiers still mix `BMS_*`, `ha-box`, `homeassistant`, `bms-company-access`.
-- Legal/marketing: ship as **Home Box**, with required open-source attribution — not as “Home Assistant” or Nabu Casa.
+## Phase status
 
-## Inventory
+### Phase 0 — Naming / legal
+- [x] Public name + slug
+- [x] DNS keep `*.ha.*` until WireGuard
+- [x] NOTICE / Core attribution
 
-| Area | Current | Target |
-| --- | --- | --- |
-| Product name | Mixed / “BMS House Box” | **Home Box** (done in docs + enroll UI) |
-| Docker image | `ha-box:local` | `home-box:local` |
-| Containers | `homeassistant`, `ha-platform-agent`, `ha-enroll-ui` | Align where safe (`home-box-agent`, …); HA service hostname may stay for less churn |
-| Env vars | `BMS_*` | Keep `BMS_*` for platform contract; document HA as engine-only |
-| Custom panel | `bms-company-access` | Product copy → Home Box; module id later |
-| HA `homeassistant.name` | `Home` | Household / **Home Box** label |
-| Frontend theme | Stock HA | Custom theme + logo |
-| Docs | Mixed | Owner docs: Home Box; tech notes may say HA for the engine |
-| Companion apps | Stock HA | Optional later |
-| Hostnames | `*.ha.localhost` | **TBD:** keep `*.ha.` vs `*.home-box.` / `*.box.` |
+### Phase 1 — Surface brand
+- [x] Home Box theme (`image/themes/home_box.yaml`) + default on start
+- [x] Logo (`/local/home-box-logo.svg`)
+- [x] Getting started + Company access panels (product copy)
+- [x] Enroll / import UIs titled Home Box
+- [ ] Operator UI wording on BMS (other repo)
 
-## Phased plan
+### Phase 2 — Identifier sweep (partial)
+- [x] Image `home-box:local`
+- [x] Containers `home-box-*` (compose service `homeassistant` kept for DNS)
+- [x] Panel ids `home-box-getting-started`, `home-box-company-access`
+- [ ] CI publish tags (when CI exists)
 
-### Phase 0 — Naming freeze — **done (name)**
+### Phase 3–4
+- Deferred (custom shell / Companion) — optional later
 
-- [x] Public name: **Home Box**
-- [x] Short slug: `home-box`
-- [ ] DNS pattern for production (`{slug}.ha.` vs `{slug}.home-box.` / `{slug}.box.`)
-- [ ] NOTICE / About with Apache-2.0 Core attribution
+## Still WireGuard-dependent (out of this pass)
 
-### Phase 1 — Surface brand (no Core fork)
-
-- Custom lovelace theme + logo in `www/`
-- Company access panel copy → Home Box
-- Titles / sidebar / enroll UI (enroll UI updated)
-- Operator UI: “Home Box” not “Home Assistant client”
-
-### Phase 2 — Identifier sweep
-
-- Image `home-box:local`, compose names, panel module ids
-- CI/build tags under `osokuka`
-- GitHub repo rename `bms-ha-box` → `home-box` if desired
-
-### Phase 3 — Optional deeper UI
-
-- Custom shell via `home-assistant-js-websocket` if themes are not enough
-
-### Phase 4 — Optional mobile
-
-- Branded Companion only if required; else web / PWA on our hostname
-
-## What we will not do
-
-- Push to the `home-assistant` GitHub org
-- Claim official Home Assistant / Nabu Casa branding
-- Strip Core license notices
-- Fork supervisor / OS / addons — stay on Container
-
-## Success criteria
-
-- Owner-facing UI says **Home Box**, not Home Assistant (except attribution)
-- Technicians still know the engine is HA Container
-- Artifacts under **osokuka**
+- Box VPN client, production relay, phone-away path, full edge HTTPS-over-VPN story

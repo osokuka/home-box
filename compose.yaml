@@ -1,6 +1,6 @@
 services:
   homeassistant:
-    container_name: homeassistant
+    container_name: home-box-core
     build:
       context: ./image
       dockerfile: Dockerfile
@@ -14,9 +14,10 @@ services:
       - ./image/configuration.yaml:/config/configuration.yaml:ro
       - ./image/packages:/config/packages:ro
       - ./image/www:/config/www:ro
+      - ./image/themes:/config/themes:ro
       # Product: Tuya Local from image (not Core cloud tuya).
       - ./image/custom_components:/config/custom_components:ro
-    # Same pattern as BMS for now: published HTTP. WireGuard is later.
+    # HTTP published for lab. WireGuard remote access is later.
     ports:
       - "8123:8123"
     extra_hosts:
@@ -26,9 +27,10 @@ services:
 
   platform-agent:
     image: python:3.12-alpine
-    container_name: ha-platform-agent
+    container_name: home-box-agent
     restart: unless-stopped
     working_dir: /app
+    hostname: platform-agent
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -51,10 +53,9 @@ services:
     networks:
       - ha
 
-  # Lab first-run: paste operator QR JSON → /config/bms_enroll.json
   enroll-ui:
     image: python:3.12-alpine
-    container_name: ha-enroll-ui
+    container_name: home-box-enroll
     restart: unless-stopped
     working_dir: /app
     extra_hosts:
@@ -75,13 +76,12 @@ services:
     networks:
       - ha
 
-  # CSV / Excel-as-CSV → Tuya Local inventory (optional HA apply with token)
   tuya-import:
     build:
       context: ./platform
       dockerfile: Dockerfile.tuya-import
     image: home-box-tuya-import:local
-    container_name: ha-tuya-import
+    container_name: home-box-tuya-import
     restart: unless-stopped
     working_dir: /app
     extra_hosts:
@@ -106,7 +106,7 @@ services:
 
   lan-router:
     image: python:3.12-alpine
-    container_name: ha-lan-router
+    container_name: home-box-lan-router
     restart: unless-stopped
     network_mode: "service:homeassistant"
     cap_add:
