@@ -1,117 +1,143 @@
 /**
- * Home Box surface branding for the HA frontend (no Core fork).
- * Loaded via frontend.extra_module_url.
- * Replaces visible "Home Assistant" product chrome with "Home Box".
+ * Home Box product chrome — survives HA frontend rewrites.
+ * panel-title-mixin sets document.title to "… – Home Assistant".
+ * ha-sidebar defaults sidebarTitle to "Home Assistant".
  */
 const BRAND = "Home Box";
-const HA_NAME = /Home Assistant/g;
+const HA_RE = /Home Assistant/g;
 
-function brandTitle() {
-  const t = document.title || "";
-  if (HA_NAME.test(t) || !t.trim()) {
-    document.title = (t || BRAND).replace(HA_NAME, BRAND) || BRAND;
-  } else if (t === "Home" || t.startsWith("Home –") || t.startsWith("Home -")) {
-    document.title = t.replace(/^Home\b/, BRAND);
-  }
+function brandize(text) {
+  return String(text ?? "").replace(HA_RE, BRAND);
 }
+
+(function patchDocumentTitle() {
+  const desc = Object.getOwnPropertyDescriptor(Document.prototype, "title");
+  if (!desc?.set || !desc?.get) return;
+  Object.defineProperty(document, "title", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      return desc.get.call(this);
+    },
+    set(value) {
+      desc.set.call(this, brandize(value) || BRAND);
+    },
+  });
+  document.title = document.title;
+})();
 
 function setMeta() {
-  let app = document.querySelector('meta[name="application-name"]');
-  if (!app) {
-    app = document.createElement("meta");
-    app.setAttribute("name", "application-name");
-    document.head.appendChild(app);
+  for (const [name, content] of [
+    ["application-name", BRAND],
+    ["apple-mobile-web-app-title", BRAND],
+  ]) {
+    let el = document.querySelector(`meta[name="${name}"]`);
+    if (!el) {
+      el = document.createElement("meta");
+      el.setAttribute("name", name);
+      document.head.appendChild(el);
+    }
+    el.setAttribute("content", content);
   }
-  app.setAttribute("content", BRAND);
-
-  let apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-  if (!apple) {
-    apple = document.createElement("meta");
-    apple.setAttribute("name", "apple-mobile-web-app-title");
-    document.head.appendChild(apple);
-  }
-  apple.setAttribute("content", BRAND);
 }
 
-function patchNodeText(root) {
-  if (!root) return;
-  const titles = root.querySelectorAll?.(".title, .main-title, .header .name") || [];
-  titles.forEach((el) => {
-    if (el.childElementCount === 0 && HA_NAME.test(el.textContent || "")) {
-      el.textContent = (el.textContent || "").replace(HA_NAME, BRAND);
+function patchLaunchScreen() {
+  const screen = document.getElementById("ha-launch-screen");
+  if (!screen) return;
+  const logo = screen.querySelector("img.ha-logo, .ha-logo");
+  if (logo && !logo.dataset.hbLogo) {
+    logo.dataset.hbLogo = "1";
+    logo.setAttribute("alt", BRAND);
+    logo.setAttribute("src", "/local/home-box-logo.svg");
+    logo.style.width = "120px";
+    logo.style.height = "auto";
+  }
+  screen.querySelectorAll("*").forEach((el) => {
+    if (el.childElementCount === 0 && HA_RE.test(el.textContent || "")) {
+      el.textContent = brandize(el.textContent);
     }
   });
 }
 
-function patchSidebar() {
-  document.querySelectorAll("ha-sidebar").forEach((el) => {
-    try {
+function paintSidebarTitle(el) {
+  if (!el?.shadowRoot) return;
+  const title = el.shadowRoot.querySelector(".title");
+  if (title && title.textContent !== BRAND) {
+    title.textContent = BRAND;
+  }
+}
+
+function forceSidebar(el) {
+  if (!el) return;
+  try {
+    if (el.sidebarTitle !== BRAND) {
       el.sidebarTitle = BRAND;
       el.setAttribute("sidebar-title", BRAND);
-    } catch (_) {
-      /* ignore */
     }
-    if (el.shadowRoot) {
-      patchNodeText(el.shadowRoot);
-      const title = el.shadowRoot.querySelector(".title");
-      if (title) title.textContent = BRAND;
-    }
-  });
-}
-
-function patchLogin() {
-  document.querySelectorAll("ha-authorize, ha-login-form, home-assistant").forEach((el) => {
-    if (el.shadowRoot) patchNodeText(el.shadowRoot);
-  });
-  // Visible headings on authorize card
-  document.querySelectorAll("h1, h2, .card-header").forEach((el) => {
-    if (HA_NAME.test(el.textContent || "")) {
-      el.textContent = (el.textContent || "").replace(HA_NAME, BRAND);
-    }
-  });
-}
-
-function patchDeep(node) {
-  if (!node) return;
-  if (node.nodeType === Node.ELEMENT_NODE) {
-    if (node.shadowRoot) {
-      patchNodeText(node.shadowRoot);
-      patchDeepWalk(node.shadowRoot);
-    }
+  } catch (_) {
+    /* ignore */
   }
+  paintSidebarTitle(el);
 }
 
-function patchDeepWalk(root) {
-  root.querySelectorAll?.("*").forEach((el) => {
-    if (el.shadowRoot) {
-      patchNodeText(el.shadowRoot);
-      patchDeepWalk(el.shadowRoot);
-    }
-  });
+function patchAllSidebars() {
+  document.querySelectorAll("ha-sidebar").forEach(forceSidebar);
 }
 
 function apply() {
-  brandTitle();
   setMeta();
-  patchSidebar();
-  patchLogin();
-  patchDeep(document.body);
+  patchLaunchScreen();
+  patchAllSidebars();
+  if (HA_RE.test(document.title || "")) {
+    document.title = brandize(document.title);
+  }
 }
 
+customElements.whenDefined("ha-sidebar").then(() => {
+  const Ctor = customElements.get("ha-sidebar");
+  if (!Ctor?.prototype) return;
+  const proto = Ctor.prototype;
+
+  const origConnected = proto.connectedCallback;
+  proto.connectedCallback = function connectedCallback() {
+    if (typeof origConnected === "function") origConnected.call(this);
+    this.sidebarTitle = BRAND;
+    this.setAttribute("sidebar-title", BRAND);
+    queueMicrotask(() => paintSidebarTitle(this));
+  };
+
+  // After Lit paints, overwrite the visible label (do not set property here — avoids loops)
+  const origUpdated = proto.updated;
+  proto.updated = function updated(changed) {
+    if (typeof origUpdated === "function") origUpdated.call(this, changed);
+    paintSidebarTitle(this);
+  };
+
+  patchAllSidebars();
+});
+
+setMeta();
 apply();
-setInterval(apply, 1500);
+
+let n = 0;
+const boot = setInterval(() => {
+  apply();
+  if (++n >= 50) clearInterval(boot);
+}, 200);
+setInterval(apply, 2000);
 
 const obs = new MutationObserver(() => apply());
-if (document.body) {
-  obs.observe(document.body, { childList: true, subtree: true, characterData: true });
-} else {
-  document.addEventListener("DOMContentLoaded", () => {
-    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
-    apply();
+const startObs = () => {
+  obs.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    characterData: true,
   });
-}
+};
+if (document.body) startObs();
+else document.addEventListener("DOMContentLoaded", startObs);
 
 window.addEventListener("location-changed", apply);
 window.addEventListener("popstate", apply);
 
-console.info("[home-box-brand] product chrome →", BRAND);
+console.info("[home-box-brand] active →", BRAND);

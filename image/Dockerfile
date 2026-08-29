@@ -9,5 +9,8 @@ RUN uv pip install --system --no-cache -r /tmp/home-box-requirements.txt \
 
 # Canonical custom components (Tuya Local only — never Core cloud "tuya").
 COPY custom_components /usr/share/home-box/custom_components
+COPY brand_frontend_assets.py /usr/share/home-box/brand_frontend_assets.py
 COPY rootfs/ /
-RUN chmod +x /etc/cont-init.d/99-home-box-tuya-local
+RUN chmod +x /etc/cont-init.d/99-home-box-tuya-local \
+  && chmod +x /etc/cont-init.d/98-home-box-brand-frontend \
+  && python3 /usr/share/home-box/brand_frontend_assets.py

@@ -29,7 +29,7 @@ Owner setup + password-reset hook contract (for BMS implementers): [`BMS_OWNER_A
 - [x] Logo (`/local/home-box-logo.svg`)
 - [x] Getting started + Company access panels (product copy)
 - [x] Enroll / import UIs titled Home Box
-- [x] Overview / sidebar product chrome → **Home Box** (`/local/home-box-brand.js` + `location_name`)
+- [x] Overview / sidebar / tab title → **Home Box** (frontend asset patch at image build + `/local/home-box-brand.js`)
 - [ ] Operator UI wording on BMS (other repo)
 
 ### Phase 2 — Identifier sweep (partial)

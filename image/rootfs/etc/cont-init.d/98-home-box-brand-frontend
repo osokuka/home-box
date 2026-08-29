@@ -1,0 +1,5 @@
+#!/bin/sh
+# Rewrite hass_frontend product chrome to Home Box (no Core fork).
+set -u
+python3 /usr/share/home-box/brand_frontend_assets.py || true
+exit 0
