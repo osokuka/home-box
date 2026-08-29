@@ -67,6 +67,7 @@ services:
     volumes:
       - ./platform/enroll_ui.py:/app/enroll_ui.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
+      - ./platform/static:/app/static:ro
       - ./config:/config
     command: ["python", "-u", "/app/enroll_ui.py"]
     networks:

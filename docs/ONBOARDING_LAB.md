@@ -12,8 +12,9 @@ QR JSON shape (from operator `prepare-box` / enrollment QR):
 ## Flow
 
 ```text
-1. Staff: Prepare box for client on BMS → copy QR JSON (or download enroll txt)
-2. Box:   Open http://127.0.0.1:8099/ → paste JSON → Save enroll
+1. Staff: Prepare box for client on BMS → show enrollment QR
+2. Box:   Open http://127.0.0.1:8099/ → Start camera → scan QR
+          (or paste JSON / fields if no camera)
 3. Box:   platform-agent writes heartbeats with appliance_uid
 4. BMS:   waiting_for_device clears; handover → awaiting_takeover
 5. Staff: Walk owner through HA takeover (operator checklist — not in this repo)
@@ -23,9 +24,11 @@ QR JSON shape (from operator `prepare-box` / enrollment QR):
 
 | Service | Port | Role |
 | --- | --- | --- |
-| `enroll-ui` | **8099** | Paste QR / fields → `/config/bms_enroll.json` |
+| `enroll-ui` | **8099** | Camera QR scan / paste → `/config/bms_enroll.json` |
 | `platform-agent` | — | Re-reads enroll each poll; `GET subscription`, `POST heartbeat` (+ uid), `POST status` |
 | `homeassistant` | 8123 | HA Core |
+
+Camera frames stay in the browser; only decoded enroll JSON is POSTed to the local enroll API. The jsQR decoder is vendored under `platform/static/` (no CDN at runtime).
 
 Enroll file wins over `.env` for token and unique ID. Optional env fallbacks: `BMS_ENROLL_TOKEN`, `BMS_APPLIANCE_UID`, `BMS_PLATFORM_URL`.
 
