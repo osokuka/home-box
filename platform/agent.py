@@ -1,7 +1,8 @@
-"""Talk to the BMS platform from this box. Read-only.
+"""Talk to the BMS platform from this box.
 
 Loads enroll from /config/bms_enroll.json (first-run UI) or env fallback.
-GET subscription + POST heartbeat (+ appliance_uid) + POST device *status*.
+GET subscription + POST heartbeat (+ appliance_uid).
+POST device status + support activity only when limited share is enabled on the box.
 Never calls Home Assistant services (no turn_on / set_hvac_mode).
 Never contacts device-vendor clouds. Outbound should be LAN/VPN only.
 """
@@ -17,6 +18,7 @@ import urllib.request
 from pathlib import Path
 
 from bms_runtime import save_runtime_from_snapshot
+from bms_share import limited_share_enabled, load_share
 from enroll_store import resolve_credentials
 
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
@@ -149,6 +151,40 @@ def collect_devices() -> list[dict]:
     return devices
 
 
+def collect_support_activity(states: list | None = None) -> list[dict]:
+    """Limited troubleshooting signals (faults / offline) — not full logs."""
+    if states is None:
+        raw = ha_get("/api/states")
+        states = raw if isinstance(raw, list) else []
+    events: list[dict] = []
+    for st in states:
+        if not isinstance(st, dict):
+            continue
+        eid = str(st.get("entity_id") or "")
+        attrs = st.get("attributes") if isinstance(st.get("attributes"), dict) else {}
+        state = str(st.get("state") or "")
+        name = str(attrs.get("friendly_name") or eid)
+        if "fault" in eid or "fault" in name.lower():
+            events.append(
+                {
+                    "type": "fault_signal",
+                    "entity_id": eid,
+                    "state": state,
+                    "name": name,
+                }
+            )
+        elif eid.startswith("climate.") and state in ("unavailable", "unknown"):
+            events.append(
+                {
+                    "type": "device_unreachable",
+                    "entity_id": eid,
+                    "state": state,
+                    "name": name,
+                }
+            )
+    return events[:50]
+
+
 def loop():
     while True:
         try:
@@ -157,6 +193,8 @@ def loop():
                 print("waiting: no enroll token (open enroll UI on :8099)", flush=True)
                 time.sleep(INTERVAL)
                 continue
+            share = load_share()
+            share_on = bool(share.get("limited_share_enabled"))
             snap = api("GET", "/api/v1/ingest/subscription/")
             fail = bool(snap.get("fail_closed"))
             ha_ok = bool(ha_get("/api/") or (CONFIG / ".storage" / "core.config").is_file())
@@ -166,26 +204,57 @@ def loop():
                     {"id": "homeassistant", "status": "ok" if ha_ok else "down"},
                     {"id": "platform-agent", "status": "ok"},
                 ],
+                "limited_share_enabled": share_on,
+                "limited_share_scope": share.get("scope") or ["status", "support_activity"],
             }
             if uid:
                 hb_body["appliance_uid"] = uid
             hb = api("POST", "/api/v1/ingest/heartbeat/", hb_body)
-            # Cache enablement flags for enroll UI (never passwords)
             try:
                 save_runtime_from_snapshot(hb if isinstance(hb, dict) else snap)
             except Exception as cache_err:
                 print(f"runtime cache warn: {cache_err}", flush=True)
             house = (hb.get("household") or {}).get("slug")
-            reset_flag = bool(((hb.get("machine") or {}) if isinstance(hb, dict) else {}).get("allow_password_reset"))
+            reset_flag = bool(
+                ((hb.get("machine") or {}) if isinstance(hb, dict) else {}).get(
+                    "allow_password_reset"
+                )
+            )
             print(
                 f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
-                f"fail_closed={fail} pwd_reset={reset_flag} platform={platform}",
+                f"fail_closed={fail} pwd_reset={reset_flag} "
+                f"limited_share={share_on} platform={platform}",
                 flush=True,
             )
-            if not fail:
+            if fail:
+                time.sleep(INTERVAL)
+                continue
+            if not share_on:
+                print(
+                    "limited share OFF — status/support not posted "
+                    "(enable under Company access on Home Box)",
+                    flush=True,
+                )
+            else:
+                states = ha_get("/api/states")
                 devices = collect_devices()
-                posted = api("POST", "/api/v1/ingest/status/", {"devices": devices})
-                print(f"status read-only count={posted.get('count')}", flush=True)
+                activity = collect_support_activity(
+                    states if isinstance(states, list) else None
+                )
+                posted = api(
+                    "POST",
+                    "/api/v1/ingest/status/",
+                    {
+                        "devices": devices,
+                        "support_activity": activity,
+                        "limited_share": True,
+                    },
+                )
+                print(
+                    f"status limited-share count={posted.get('count')} "
+                    f"activity={len(activity)}",
+                    flush=True,
+                )
         except urllib.error.HTTPError as err:
             body = err.read().decode(errors="replace")
             print("error", {"http": err.code, "body": body[:300]}, flush=True)
@@ -198,7 +267,8 @@ if __name__ == "__main__":
     platform, token, uid = resolve_credentials()
     print(
         f"platform-agent ingest {platform} uid={uid or 'unset'} "
-        f"token={'set' if token else 'missing'} every {INTERVAL}s (read-only)",
+        f"token={'set' if token else 'missing'} every {INTERVAL}s "
+        f"(status gated by limited share)",
         flush=True,
     )
     loop()

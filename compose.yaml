@@ -47,6 +47,7 @@ services:
       - ./platform/agent.py:/app/agent.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
       - ./platform/bms_runtime.py:/app/bms_runtime.py:ro
+      - ./platform/bms_share.py:/app/bms_share.py:ro
       - ./config:/config
     command: ["python", "-u", "/app/agent.py"]
     depends_on:

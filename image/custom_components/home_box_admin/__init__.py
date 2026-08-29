@@ -15,7 +15,7 @@ from aiohttp import web
 
 from homeassistant.auth.const import GROUP_ID_ADMIN
 from homeassistant.auth.providers.homeassistant import HassAuthProvider, InvalidUser
-from homeassistant.components.http import KEY_HASS
+from homeassistant.components.http import KEY_HASS, KEY_HASS_USER
 from homeassistant.components.http.view import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
@@ -26,12 +26,14 @@ DOMAIN = "home_box_admin"
 CONFIG = Path("/config")
 ENROLL_PATH = CONFIG / "bms_enroll.json"
 RUNTIME_PATH = CONFIG / "bms_runtime.json"
+SHARE_PATH = CONFIG / "bms_share.json"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     hass.http.register_view(OwnerStatusView())
     hass.http.register_view(OwnerCreateView())
     hass.http.register_view(PasswordResetView())
+    hass.http.register_view(LimitedShareView())
     return True
 
 
@@ -259,3 +261,79 @@ class PasswordResetView(HomeAssistantView):
                 "note": "New password is only on this Home Box. BMS staff can turn the reset switch off.",
             }
         )
+
+
+def _share_sync_load() -> dict[str, Any]:
+    data = _read_json_sync(SHARE_PATH)
+    return {
+        "limited_share_enabled": bool(data.get("limited_share_enabled")),
+        "scope": list(data.get("scope") or ["status", "support_activity"]),
+        "updated_at": data.get("updated_at"),
+    }
+
+
+def _share_sync_save(enabled: bool) -> dict[str, Any]:
+    from datetime import datetime, timezone
+
+    body = {
+        "v": 1,
+        "limited_share_enabled": bool(enabled),
+        "scope": ["status", "support_activity"],
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "note": (
+            "Box consent only. No company sees data until the homeowner "
+            "grants a limited share to that company in BMS."
+        ),
+    }
+    SHARE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SHARE_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(SHARE_PATH)
+    return body
+
+
+class LimitedShareView(HomeAssistantView):
+    """Owner toggle for limited share consent (status + support activity).
+
+    Does not grant any company. BMS ShareGrant is a separate step.
+    """
+
+    url = "/api/home_box/limited_share"
+    name = "api:home_box:limited_share"
+    requires_auth = True
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app[KEY_HASS]
+        user = request[KEY_HASS_USER]
+        if user is None or not user.is_admin:
+            return self.json({"ok": False, "error": "admin_required"}, status=403)
+        share = await hass.async_add_executor_job(_share_sync_load)
+        runtime = await _read_json(hass, RUNTIME_PATH)
+        grants = runtime.get("shares") if isinstance(runtime.get("shares"), list) else []
+        return self.json(
+            {
+                "ok": True,
+                **share,
+                "active_company_grants": grants,
+                "note": (
+                    "Turning this on only allows limited status/support data to leave the box "
+                    "toward BMS. No company sees it until you grant them in BMS."
+                ),
+            }
+        )
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app[KEY_HASS]
+        user = request[KEY_HASS_USER]
+        if user is None or not user.is_admin:
+            return self.json({"ok": False, "error": "admin_required"}, status=403)
+        data = await _json_body(request)
+        if "enabled" not in data:
+            return self.json(
+                {"ok": False, "error": "invalid_input", "hint": "JSON {\"enabled\": true|false}"},
+                status=400,
+            )
+        enabled = bool(data.get("enabled"))
+        body = await hass.async_add_executor_job(_share_sync_save, enabled)
+        _LOGGER.info("home_box_admin limited_share_enabled=%s", enabled)
+        return self.json({"ok": True, **body})

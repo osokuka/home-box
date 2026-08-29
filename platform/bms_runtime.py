@@ -27,6 +27,7 @@ def save_runtime_from_snapshot(snap: dict[str, Any]) -> dict[str, Any]:
         "fail_closed": bool(snap.get("fail_closed")),
         "live_status": snap.get("live_status"),
         "allow_password_reset": bool(machine.get("allow_password_reset")),
+        "shares": snap.get("shares") if isinstance(snap.get("shares"), list) else [],
         "machine": {
             "id": machine.get("id"),
             "name": machine.get("name"),
@@ -34,6 +35,7 @@ def save_runtime_from_snapshot(snap: dict[str, Any]) -> dict[str, Any]:
             "ha_hostname": machine.get("ha_hostname"),
             "handover_state": machine.get("handover_state"),
             "allow_password_reset": bool(machine.get("allow_password_reset")),
+            "limited_share_enabled": machine.get("limited_share_enabled"),
         },
         "household": {
             "slug": household.get("slug"),

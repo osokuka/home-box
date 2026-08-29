@@ -29,7 +29,7 @@ class HomeBoxGettingStarted extends HTMLElement {
       <h2>2. Where things live</h2>
       <ul>
         <li>Home Box UI — this screen and the sidebar.</li>
-        <li>Company monitoring — read-only via the BMS platform share (not device on/off).</li>
+        <li>Company monitoring — only after you enable <strong>Limited share</strong> on Company access <em>and</em> grant that company in BMS (status/support only, no on/off).</li>
         <li>Enroll / re-enroll lab tools — <code>http://127.0.0.1:8099/</code> (QR from BMS).</li>
         <li>Tuya device CSV import — <code>http://127.0.0.1:8098/</code>.</li>
       </ul>

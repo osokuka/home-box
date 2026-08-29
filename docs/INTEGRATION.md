@@ -65,7 +65,7 @@ If subscription reports `fail_closed`, the agent still heartbeats but should not
 
 | Need | Who creates it | What they can do |
 | --- | --- | --- |
-| Watch status / troubleshoot without buttons | Platform share (operator repo) | Read telemetry we POST |
+| Watch status / troubleshoot without buttons | Platform share (operator repo) | Requires box **Limited share** ON **and** BMS company grant — [`BMS_LIMITED_SHARE.md`](./BMS_LIMITED_SHARE.md) |
 | Open HA and look around | **House owner** in HA → People | Owner chooses user vs read-only group |
 | Turn devices on/off | **House owner** gives a normal HA user | Not BMS staff |
 
