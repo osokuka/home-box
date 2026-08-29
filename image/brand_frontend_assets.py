@@ -1,35 +1,41 @@
 #!/usr/bin/env python3
-"""Patch hass_frontend static assets so product chrome says Home Box.
+"""Brand Home Box into frontend + Assist strings (no Core fork).
 
-Safe replacements only — leaves Home Assistant Cloud/Core/Cast/etc.
-Run at container start (image entrypoint hook) or image build.
+Patches:
+  - hass_frontend HTML/JS product chrome
+  - home_assistant_intents greetings (Hello from Home Box.)
+  - conversation DefaultAgent display name when present on disk
+  - /config assist pipeline display name (if storage exists)
+
+Safe replacements restore Home Assistant Cloud/Core/Cast/etc.
 """
 
 from __future__ import annotations
 
-import re
+import json
 import sys
 from pathlib import Path
 
-ROOT = Path("/usr/local/lib/python3.14/site-packages/hass_frontend")
 BRAND = "Home Box"
 
-# Exact product-chrome replacements (order matters)
+FRONTEND_ROOTS = list(Path("/usr/local/lib").glob("python*/site-packages/hass_frontend"))
+INTENTS_ROOTS = list(Path("/usr/local/lib").glob("python*/site-packages/home_assistant_intents"))
+
 REPLACEMENTS: list[tuple[str, str]] = [
     (">Home Assistant</title>", f">{BRAND}</title>"),
     ('content="Home Assistant"', f'content="{BRAND}"'),
     ('alt="Home Assistant"', f'alt="{BRAND}"'),
     ("alt='Home Assistant'", f"alt='{BRAND}'"),
-    (" – Home Assistant", f" – {BRAND}"),  # en-dash (panel-title-mixin)
+    (" – Home Assistant", f" – {BRAND}"),
     (" –Home Assistant", f" –{BRAND}"),
     (" - Home Assistant", f" - {BRAND}"),
-    # sidebar default title as JS string literals
     ('"Home Assistant"', f'"{BRAND}"'),
     ("'Home Assistant'", f"'{BRAND}'"),
     ("`Home Assistant`", f"`{BRAND}`"),
+    ("Hello from Home Assistant.", f"Hello from {BRAND}."),
+    ("Hello from Home Assistant", f"Hello from {BRAND}"),
 ]
 
-# Restore known compound product names we must NOT brand
 RESTORE: list[tuple[str, str]] = [
     (f"{BRAND} Cloud", "Home Assistant Cloud"),
     (f"{BRAND} Core", "Home Assistant Core"),
@@ -44,7 +50,6 @@ RESTORE: list[tuple[str, str]] = [
     (f"{BRAND} Analytics", "Home Assistant Analytics"),
     (f"{BRAND} Community", "Home Assistant Community"),
     (f"my.{BRAND}", "my.home-assistant"),
-    (f"www.{BRAND}", "www.home-assistant"),  # unlikely
 ]
 
 
@@ -58,19 +63,16 @@ def patch_text(text: str) -> str:
 
 
 def patch_file(path: Path) -> bool:
-    raw = path.read_bytes()
-    # skip compressed companions
     if path.suffix in {".br", ".gz", ".map"}:
         return False
     try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
         return False
     new = patch_text(text)
     if new == text:
         return False
     path.write_text(new, encoding="utf-8")
-    # invalidate precompressed if present so HA serves patched plain file
     for ext in (".br", ".gz"):
         sibling = Path(str(path) + ext)
         if sibling.is_file():
@@ -78,17 +80,75 @@ def patch_file(path: Path) -> bool:
     return True
 
 
-def main() -> int:
-    if not ROOT.is_dir():
-        # try glob for other python versions
-        candidates = list(Path("/usr/local/lib").glob("python*/site-packages/hass_frontend"))
-        if not candidates:
-            print("home-box-brand-assets: hass_frontend not found", flush=True)
-            return 0
-        root = candidates[0]
-    else:
-        root = ROOT
+def patch_intents() -> int:
+    changed = 0
+    for root in INTENTS_ROOTS:
+        data = root / "data"
+        if not data.is_dir():
+            continue
+        for path in data.glob("*.json"):
+            try:
+                blob = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            raw = json.dumps(blob, ensure_ascii=False)
+            new = patch_text(raw)
+            if new == raw:
+                continue
+            # Keep JSON valid
+            path.write_text(
+                json.dumps(json.loads(new), ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            changed += 1
+            print(f"home-box-brand-assets: intents {path.name}", flush=True)
+    return changed
 
+
+def patch_default_agent_name() -> int:
+    changed = 0
+    for path in Path("/usr/src/homeassistant").glob(
+        "**/components/conversation/default_agent.py"
+    ):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        new = text.replace('_attr_name = "Home Assistant"', f'_attr_name = "{BRAND}"')
+        new = new.replace("_attr_name = 'Home Assistant'", f"_attr_name = '{BRAND}'")
+        if new != text:
+            path.write_text(new, encoding="utf-8")
+            changed += 1
+            print(f"home-box-brand-assets: agent name {path}", flush=True)
+    return changed
+
+
+def patch_pipeline_storage() -> int:
+    path = Path("/config/.storage/assist_pipeline.pipelines")
+    if not path.is_file():
+        return 0
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    data = blob.get("data") if isinstance(blob, dict) else None
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return 0
+    changed = 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("name") == "Home Assistant":
+            item["name"] = BRAND
+            changed += 1
+    if changed:
+        path.write_text(json.dumps(blob, indent=2) + "\n", encoding="utf-8")
+        print("home-box-brand-assets: assist pipeline renamed", flush=True)
+    return changed
+
+
+def patch_frontend(root: Path) -> int:
     targets: list[Path] = []
     for name in ("index.html", "authorize.html", "onboarding.html"):
         p = root / name
@@ -100,23 +160,17 @@ def main() -> int:
             continue
         targets.extend(d.glob("app.*.js"))
         targets.extend(d.glob("onboarding.*.js"))
-        # chunk that contained sidebarTitle in this build
         targets.extend(d.glob("73524.*.js"))
-        targets.extend(d.glob("*sidebar*.js"))
-
-    # Also scan chunks that contain the title mixin en-dash phrase
-    for sub in ("frontend_latest", "frontend_es5"):
-        d = root / sub
-        if not d.is_dir():
-            continue
         for p in d.glob("*.js"):
-            if p.suffix != ".js":
-                continue
             try:
                 sample = p.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 continue
-            if "– Home Assistant" in sample or 'sidebarTitle:"Home Assistant"' in sample or "sidebarTitle:'Home Assistant'" in sample:
+            if (
+                "– Home Assistant" in sample
+                or 'sidebarTitle:"Home Assistant"' in sample
+                or "Hello from Home Assistant" in sample
+            ):
                 if p not in targets:
                     targets.append(p)
 
@@ -128,6 +182,24 @@ def main() -> int:
                 print(f"home-box-brand-assets: patched {path}", flush=True)
         except Exception as err:
             print(f"home-box-brand-assets: skip {path}: {err}", flush=True)
+    return changed
+
+
+def main() -> int:
+    changed = 0
+    roots = FRONTEND_ROOTS or (
+        [Path("/usr/local/lib/python3.14/site-packages/hass_frontend")]
+        if Path("/usr/local/lib/python3.14/site-packages/hass_frontend").is_dir()
+        else []
+    )
+    if not roots:
+        print("home-box-brand-assets: hass_frontend not found", flush=True)
+    for root in roots:
+        changed += patch_frontend(root)
+
+    changed += patch_intents()
+    changed += patch_default_agent_name()
+    changed += patch_pipeline_storage()
 
     print(f"home-box-brand-assets: done changed={changed}", flush=True)
     return 0
