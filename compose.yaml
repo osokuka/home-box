@@ -104,6 +104,35 @@ services:
     networks:
       - ha
 
+  # Read-only MCP for OpenClaw / AI agents (no device commands)
+  home-box-mcp:
+    build:
+      context: ./platform
+      dockerfile: Dockerfile.mcp
+    image: home-box-mcp:local
+    container_name: home-box-mcp
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+      BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
+      BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
+      BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-climate.heat_pump}
+      BMS_MCP_HOST: "0.0.0.0"
+      BMS_MCP_PORT: "8100"
+      HA_CONFIG: /config
+    ports:
+      - "8100:8100"
+    volumes:
+      - ./platform/mcp_server.py:/app/mcp_server.py:ro
+      - ./platform/ha_readonly.py:/app/ha_readonly.py:ro
+      - ./config:/config:ro
+    command: ["python", "-u", "/app/mcp_server.py"]
+    depends_on:
+      - homeassistant
+    networks:
+      - ha
+
   lan-router:
     image: python:3.12-alpine
     container_name: home-box-lan-router
