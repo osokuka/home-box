@@ -4,7 +4,7 @@ Org: [https://github.com/home-assistant](https://github.com/home-assistant) (~10
 
 Our private docs and (later) code stay under **[osokuka](https://github.com/osokuka)**. We do not contribute this product into the upstream org.
 
-## Dependency map for BMS House Box
+## Dependency map for Home Box
 
 | Upstream repo | Stars (approx.) | License | Our use |
 | --- | --- | --- | --- |
@@ -42,6 +42,6 @@ Our private docs and (later) code stay under **[osokuka](https://github.com/osok
 When updating the box:
 
 1. Track HA Core release notes for the pinned image tag.
-2. Rebuild `ha-box:local` so wheels stay offline at runtime.
+2. Rebuild `home-box:local` so wheels stay offline at runtime.
 3. Retest egress filter (no Core WAN) and ingest agent after upgrades.
 4. Retest BMS nginx WebSocket proxy to `/api/websocket`.

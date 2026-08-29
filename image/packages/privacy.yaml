@@ -1,0 +1,12 @@
+# Loaded as Home Assistant packages. Keep integrations local.
+
+logger:
+  default: warning
+  logs:
+    custom_components.tuya_local: warning
+    homeassistant.components.cloud: error
+    homeassistant.components.analytics: error
+    homeassistant.components.my: error
+    homeassistant.components.homeassistant_alerts: error
+    homeassistant.components.hassio: error
+    metno: error

@@ -54,7 +54,7 @@ If subscription reports `fail_closed`, the agent still heartbeats but should not
 ## Privacy (still true)
 
 - HA Core egress is RFC1918 / link-local / multicast only. No Nabu Casa, Tuya cloud, GitHub, PyPI, or analytics from Core.
-- Python deps for custom components are baked into `ha-box:local` at image build.
+- Python deps for custom components are baked into `home-box:local` at image build.
 - IoT gadgets must not use the house WAN (router VLAN with no default route).
 - Lovelace is not iframed into other sites (`use_x_frame_options: true`).
 - `image/configuration.yaml` does **not** load `default_config`.

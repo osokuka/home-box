@@ -1,0 +1,55 @@
+# Home Box. URLs come from config/secrets.yaml (not committed).
+
+homeassistant:
+  name: Home Box
+  external_url: !secret ha_external_url
+  internal_url: !secret ha_internal_url
+  packages: !include_dir_named packages
+
+http:
+  use_x_forwarded_for: true
+  use_x_frame_options: true
+  ip_ban_enabled: true
+  login_attempts_threshold: 5
+  # BMS nginx / Docker on this host. Do not add 0.0.0.0/0.
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+
+# Local stack instead of default_config (that one loads Nabu Casa, my.*, alerts).
+assist_pipeline:
+bluetooth:
+conversation:
+dhcp:
+energy:
+file:
+go2rtc:
+history:
+logbook:
+media_source:
+mobile_app:
+ssdp:
+stream:
+sun:
+usb:
+webhook:
+zeroconf:
+
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+# Owner-only: how THEY create a troubleshooting login. We never set that password.
+panel_custom:
+  - name: bms-company-access
+    sidebar_title: Company access
+    sidebar_icon: mdi:account-hard-hat
+    url_path: company-access
+    module_url: /local/bms-company-access.js
+    require_admin: true

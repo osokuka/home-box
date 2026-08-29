@@ -1,4 +1,4 @@
-# Technician notes — BMS House Box
+# Technician notes — Home Box
 
 You set up **devices on the house box**. You do not assign HVAC companies. You do not create company passwords in HA. The owner does that.
 

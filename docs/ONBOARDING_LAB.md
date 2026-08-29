@@ -1,7 +1,7 @@
-# Lab onboarding — enroll this HA box with BMS
+# Lab onboarding — enroll Home Box with BMS
 
 Operator platform owns prepare-box / QR / handover UI (other repo/location).  
-**This stack** stores the QR on the box and announces with `appliance_uid`.
+**Home Box** stores the QR on the device and announces with `appliance_uid`.
 
 QR JSON shape (from operator `prepare-box` / enrollment QR):
 

@@ -1,0 +1,3 @@
+# Installed at image build only. Runtime has no PyPI / GitHub / vendor clouds.
+# tuya-device-sharing-sdk is already in upstream HA (cloud Tuya). Do not pin-downgrade it.
+tinytuya==1.20.0

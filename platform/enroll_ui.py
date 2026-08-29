@@ -1,4 +1,4 @@
-"""Lab first-run enroll UI for BMS House Box.
+"""Lab first-run enroll UI for Home Box.
 
 Scan the operator QR with the camera, or paste JSON / fields.
 Writes /config/bms_enroll.json. platform-agent picks it up on the next loop.
@@ -26,7 +26,7 @@ PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BMS House Box — enroll</title>
+  <title>Home Box — enroll</title>
   <style>
     :root { color-scheme: light; --ink:#1a1f1c; --muted:#5c6b63; --line:#c5d0c8; --bg:#eef3ef; --card:#fff; --acc:#2f6f4e; --warn:#8a6d1d; }
     * { box-sizing: border-box; }
@@ -60,8 +60,8 @@ PAGE = """<!DOCTYPE html>
 </head>
 <body>
   <main>
-    <h1>BMS House Box enroll</h1>
-    <p class="sub">Scan the enrollment QR from the BMS operator client page, or paste the JSON. This box then heartbeats with that unique ID. Device-vendor clouds are never used.</p>
+    <h1>Home Box enroll</h1>
+    <p class="sub">Scan the enrollment QR from the BMS operator client page, or paste the JSON. This Home Box then heartbeats with that unique ID. Device-vendor clouds are never used.</p>
 
     <section id="status" class="status idle">Loading…</section>
 
