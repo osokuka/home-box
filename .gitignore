@@ -2,6 +2,8 @@
 config/secrets.yaml
 config/bms_enroll.json
 config/bms_enroll.tmp
+config/tuya_import_queue.json
+config/tuya_import_queue.tmp
 config/.storage/
 config/*.db
 config/*.db-*

@@ -1,0 +1,2 @@
+name,device_id,local_key,host,protocol_version,type,poll_only
+Heat pump,REPLACE_DEVICE_ID,REPLACE_LOCAL_KEY,192.168.0.34,3.4,wifi_heatpump,false

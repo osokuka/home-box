@@ -23,6 +23,7 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | How the box talks to BMS (ingest contract) |
 | [docs/ONBOARDING_LAB.md](docs/ONBOARDING_LAB.md) | Lab enroll UI (:8099) + camera QR + unique ID |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Tuya Local only (not Core cloud Tuya) |
+| [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md) | CSV / Excel import or manual device add |
 | [docs/TECHNICIAN_SETUP.md](docs/TECHNICIAN_SETUP.md) | On-site device pairing procedure |
 | [docs/REBRAND.md](docs/REBRAND.md) | Naming freeze + remaining rebrand phases |
 | [docs/UPSTREAM_HA.md](docs/UPSTREAM_HA.md) | Which Home Assistant org repos matter |

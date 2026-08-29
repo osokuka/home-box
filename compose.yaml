@@ -75,6 +75,35 @@ services:
     networks:
       - ha
 
+  # CSV / Excel-as-CSV → Tuya Local inventory (optional HA apply with token)
+  tuya-import:
+    build:
+      context: ./platform
+      dockerfile: Dockerfile.tuya-import
+    image: home-box-tuya-import:local
+    container_name: ha-tuya-import
+    restart: unless-stopped
+    working_dir: /app
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+      BMS_TUYA_IMPORT_PORT: "8098"
+      BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
+      BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
+      HA_CONFIG: /config
+    ports:
+      - "8098:8098"
+    volumes:
+      - ./platform/tuya_import_ui.py:/app/tuya_import_ui.py:ro
+      - ./platform/tuya_csv.py:/app/tuya_csv.py:ro
+      - ./config:/config
+    command: ["python", "-u", "/app/tuya_import_ui.py"]
+    depends_on:
+      - homeassistant
+    networks:
+      - ha
+
   lan-router:
     image: python:3.12-alpine
     container_name: ha-lan-router
