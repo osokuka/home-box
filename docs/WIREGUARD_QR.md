@@ -83,14 +83,26 @@ Phone / user peers stay **out of the box QR** (download separately for phones).
 
 1. On enroll save → write `/config/wireguard/wg0.conf` (+ `wg_confs/wg0.conf` for linuxserver)
 2. If QR included WG → enroll UI calls `/api/wg/apply` (restart `home-box-wireguard` when possible)
-3. Webpage shows a **45s countdown** while polling BMS hello
-4. When BMS is reachable → reveal **Home Box admin registration** (new password, local only)
-5. Status on `:8099` shows WireGuard **saved** + endpoint/address crumbs
-6. Clear enroll also clears the WG conf
+3. Webpage shows a countdown while polling BMS hello (`failed` → `standby` → `ok`)
+4. **Standby:** BMS is reachable but still provisioning (edge/hostname). UI shows the standby notification and **does not redirect**
+5. **Ok only:** when hello reports `ok`, reveal admin registration (or QR admin bootstrap) and then redirect to `https://{ha_hostname}`
+6. Status on `:8099` shows WireGuard **saved** + endpoint/address crumbs
+7. Clear enroll also clears the WG conf
 
 **Important:** QR `platform_url` (e.g. `http://10.10.0.1`) is saved as-is and used for hello. Lab env `BMS_PLATFORM_URL` / `host.docker.internal` must **not** overwrite it. Hello to `10.10.*` runs inside the WireGuard container netns.
 
 Home Box UI is published on the box WG address **`:8123`** (socat proxy in the WG netns → `homeassistant`). Edge/CF should target `https://box-….scardustech.com` → hub → `10.10.x.y:8123`.
+
+### Hello readiness (BMS → Home Box)
+
+Subscription / hello may include any of:
+
+| Field | Values |
+| --- | --- |
+| `enroll_status` / `enroll_gate` / `public_access` / `machine.edge_status` | `standby` \| `ok` |
+| `notification` / `enroll_message` | human text shown on the wait screen |
+
+Home Box treats connectivity success with no gate field as **`ok`** (older BMS). When BMS sends **`standby`**, the enroll UI waits (up to ~5 minutes) until **`ok`** before redirecting.
 
 ## Apply the tunnel
 

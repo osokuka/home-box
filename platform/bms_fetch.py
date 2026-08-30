@@ -113,15 +113,68 @@ def bms_request(
     return _direct(method.upper(), url, token, body, timeout)
 
 
+def _readiness(snap: dict[str, Any]) -> tuple[str, str]:
+    """Return (state, notification) from subscription snapshot.
+
+    ``state`` is ``standby`` while BMS finishes edge/hostname work, or ``ok``
+    when the box may redirect to the public URL. Missing gate fields default
+    to ``ok`` (backward compatible with older BMS snapshots).
+    """
+    machine = snap.get("machine") if isinstance(snap.get("machine"), dict) else {}
+    top_status = str(snap.get("status") or "").strip().lower()
+    candidates = [
+        snap.get("enroll_status"),
+        snap.get("enroll_gate"),
+        snap.get("public_access"),
+        snap.get("bms_hello"),
+        top_status if top_status in ("standby", "ok", "ready", "pending", "provisioning", "waiting") else None,
+        machine.get("edge_status"),
+        machine.get("public_access"),
+        machine.get("enroll_status"),
+        machine.get("enroll_gate"),
+    ]
+    notification = (
+        snap.get("notification")
+        or snap.get("enroll_message")
+        or snap.get("message")
+        or machine.get("notification")
+        or machine.get("enroll_message")
+        or machine.get("message")
+        or ""
+    )
+    note = str(notification).strip()
+    for raw in candidates:
+        if raw is None or raw is False:
+            continue
+        if raw is True:
+            return "ok", note
+        val = str(raw).strip().lower()
+        if val in ("standby", "pending", "provisioning", "waiting", "not_ready", "busy"):
+            return "standby", note or "Standby: BMS is finishing setup. Do not leave this page."
+        if val in ("ok", "ready", "available", "done"):
+            return "ok", note
+    return "ok", note
+
+
 def bms_hello() -> dict[str, Any]:
-    """GET subscription snapshot; normalize enroll-ui hello response."""
+    """GET subscription snapshot; normalize enroll-ui hello response.
+
+    ``ok`` is True only when BMS reports ready to redirect (not merely reachable).
+    ``bms_hello`` is ``failed`` | ``standby`` | ``ok``.
+    """
     platform, token, _uid = resolve_credentials()
     if not token:
-        return {"ok": False, "error": "not_enrolled", "bms_hello": "failed"}
+        return {
+            "ok": False,
+            "reachable": False,
+            "error": "not_enrolled",
+            "bms_hello": "failed",
+        }
     platform = (platform or "").rstrip("/")
     if not platform:
         return {
             "ok": False,
+            "reachable": False,
             "error": "no platform_url in enroll (QR must include platform_url)",
             "bms_hello": "failed",
         }
@@ -132,6 +185,7 @@ def bms_hello() -> dict[str, Any]:
         body = err.read().decode(errors="replace")[:300]
         return {
             "ok": False,
+            "reachable": False,
             "error": f"BMS HTTP {err.code}: {body}",
             "bms_hello": "failed",
             "platform_url": platform,
@@ -140,17 +194,23 @@ def bms_hello() -> dict[str, Any]:
     except Exception as err:
         return {
             "ok": False,
+            "reachable": False,
             "error": str(err),
             "bms_hello": "failed",
             "platform_url": platform,
             "via": via,
         }
+
+    state, notification = _readiness(snap if isinstance(snap, dict) else {})
+    machine = snap.get("machine") if isinstance(snap.get("machine"), dict) else {}
     return {
-        "ok": True,
-        "bms_hello": "ok",
+        "ok": state == "ok",
+        "reachable": True,
+        "bms_hello": state,
+        "notification": notification,
         "slug": (snap.get("household") or {}).get("slug"),
-        "handover_state": (snap.get("machine") or {}).get("handover_state"),
-        "allow_password_reset": bool((snap.get("machine") or {}).get("allow_password_reset")),
+        "handover_state": machine.get("handover_state"),
+        "allow_password_reset": bool(machine.get("allow_password_reset")),
         "unique_id": snap.get("unique_id") or snap.get("appliance_uid"),
         "platform_url": platform,
         "via": via,

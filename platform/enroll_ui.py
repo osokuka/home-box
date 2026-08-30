@@ -88,7 +88,7 @@ PAGE = r"""<!DOCTYPE html>
   <main>
     <h1>Home Box enroll</h1>
     <p class="sub">Scan the BMS QR (enroll + optional WireGuard + optional one-time admin). After BMS is reachable, admin is created from the QR when present, otherwise you set the password here.</p>
-    <p class="steps">1 · QR (+ WG + admin) → 2 · Wait for BMS → 3 · Admin ready → public hostname</p>
+    <p class="steps">1 · QR (+ WG + admin) → 2 · Wait for BMS (standby→ok) → 3 · Admin → public hostname</p>
 
     <section id="status" class="status idle">Loading…</section>
 
@@ -186,7 +186,7 @@ PAGE = r"""<!DOCTYPE html>
     let scanning = false;
     let lastSavedKey = "";
     let waitAbort = false;
-    const BMS_WAIT_SECONDS = 45;
+    const BMS_READY_WAIT_SECONDS = 300;
 
     function setMsg(el, text, isErr) {
       el.textContent = text || "";
@@ -205,9 +205,9 @@ PAGE = r"""<!DOCTYPE html>
       show("secReset", false);
       show("secDone", false);
       document.getElementById("waitActions").style.display = "none";
-      document.getElementById("countdownNum").textContent = String(BMS_WAIT_SECONDS);
+      document.getElementById("countdownNum").textContent = String(BMS_READY_WAIT_SECONDS);
       document.getElementById("countdownHint").textContent =
-        hint || "Applying WireGuard keys and waiting until BMS is reachable…";
+        hint || "Applying WireGuard keys and waiting until BMS is ready…";
       setMsg(waitMsg, "");
     }
 
@@ -220,46 +220,74 @@ PAGE = r"""<!DOCTYPE html>
     async function pollHelloOnce() {
       const hello = await fetch("/api/hello", { method: "POST" });
       const helloBody = await hello.json().catch(() => ({}));
-      return { ok: hello.ok && !!(helloBody && helloBody.ok), body: helloBody };
+      const state = String((helloBody && helloBody.bms_hello) || "").toLowerCase();
+      const reachable = !!(helloBody && (helloBody.reachable || state === "standby" || state === "ok"));
+      return {
+        ready: !!(helloBody && helloBody.ok && state === "ok"),
+        standby: state === "standby",
+        reachable: reachable,
+        body: helloBody,
+      };
     }
 
     async function waitForBms(seconds) {
-      const total = seconds || BMS_WAIT_SECONDS;
+      const total = seconds || BMS_READY_WAIT_SECONDS;
       const numEl = document.getElementById("countdownNum");
       const hintEl = document.getElementById("countdownHint");
       const actions = document.getElementById("waitActions");
       actions.style.display = "none";
       const deadline = Date.now() + total * 1000;
+      let sawStandby = false;
       while (!waitAbort && Date.now() < deadline) {
         const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
         numEl.textContent = String(left);
-        hintEl.textContent = "Waiting for BMS over WireGuard… " + left + "s remaining.";
         try {
           const r = await pollHelloOnce();
-          if (r.ok) {
+          if (r.ready) {
             numEl.textContent = "0";
-            setMsg(waitMsg, "BMS reached. Continue with admin registration.");
+            setMsg(waitMsg, (r.body && r.body.notification) || "BMS ready (ok). Continuing…");
+            hintEl.textContent = "BMS reported ok.";
             return true;
           }
-          setMsg(waitMsg, (r.body && r.body.error) ? ("Still waiting: " + r.body.error) : "Still waiting for BMS…");
+          if (r.standby) {
+            sawStandby = true;
+            const note = (r.body && r.body.notification) ||
+              "Standby: BMS is finishing backend setup. Stay on this page.";
+            setMsg(waitMsg, note);
+            hintEl.textContent = "Standby — waiting for BMS ok… " + left + "s remaining.";
+          } else if (r.reachable) {
+            setMsg(waitMsg, "BMS reachable; waiting for ready (ok)…");
+            hintEl.textContent = "Waiting for BMS ok… " + left + "s remaining.";
+          } else {
+            const err = (r.body && r.body.error) || "Still waiting for BMS…";
+            setMsg(waitMsg, sawStandby ? ("Lost BMS briefly: " + err) : err);
+            hintEl.textContent = "Waiting for BMS over WireGuard… " + left + "s remaining.";
+          }
         } catch (e) {
           setMsg(waitMsg, "Still waiting: " + (e.message || String(e)));
+          hintEl.textContent = "Waiting for BMS… " + left + "s remaining.";
         }
         await new Promise((res) => setTimeout(res, 1000));
       }
       if (waitAbort) return false;
       numEl.textContent = "0";
-      hintEl.textContent = "BMS not reached within " + total + " seconds.";
-      setMsg(waitMsg, "Timed out. Check WireGuard / BMS, then retry.", true);
+      hintEl.textContent = sawStandby
+        ? "BMS stayed on standby (no ok) within " + total + " seconds."
+        : "BMS not ready within " + total + " seconds.";
+      setMsg(waitMsg, "Timed out. Check WireGuard / BMS edge, then retry.", true);
       actions.style.display = "flex";
       return false;
     }
 
-    async function tryQrAdminBootstrap() {
+    async function tryQrAdminBootstrap(doRedirect) {
       try {
         const boot = await fetch("/api/owner-bootstrap", { method: "POST" });
         const bootBody = await boot.json().catch(() => ({}));
         if (boot.ok && bootBody && bootBody.ok && !bootBody.skipped) {
+          if (doRedirect === false) {
+            setMsg(msgEl, "Admin created from QR. Waiting for BMS ok before redirect…");
+            return "bootstrapped";
+          }
           setMsg(msgEl, "Admin created from QR. Redirecting…");
           const dest = bootBody.redirect || publicRedirectUrl(await refresh() || {});
           try { window.location.replace(dest); } catch (e) {}
@@ -272,7 +300,8 @@ PAGE = r"""<!DOCTYPE html>
     async function afterBmsOk() {
       show("secWait", false);
       show("secEnroll", false);
-      if (await tryQrAdminBootstrap()) return;
+      // Ready (ok) only — never redirect on standby.
+      if (await tryQrAdminBootstrap(true)) return;
       setMsg(msgEl, "BMS hello OK. Register the Home Box admin below.");
       await refresh();
       show("secOwner", true);
@@ -312,7 +341,8 @@ PAGE = r"""<!DOCTYPE html>
           "</code><br>hostname <code>" + (s.bms_ha_hostname || s.ha_hostname || "—") +
           "</code><br>platform_url <code>" + (s.platform_url || "—") +
           "</code><br>BMS hello: <code>" + (s.bms_hello || "—") +
-          "</code>" + (s.bms_hello_error ? (" <span class='err'>" + s.bms_hello_error + "</span>") : "") +
+          "</code>" + (s.notification ? (" — " + s.notification) : "") +
+          (s.bms_hello_error ? (" <span class='err'>" + s.bms_hello_error + "</span>") : "") +
           wgLine;
         // Never show QR enroll again after identity is saved.
         show("secEnroll", false);
@@ -320,8 +350,12 @@ PAGE = r"""<!DOCTYPE html>
           return s;
         }
         if (s.bms_hello !== "ok") {
-          enterWaitMode("Reconnecting to BMS…");
-          const ok = await waitForBms(BMS_WAIT_SECONDS);
+          enterWaitMode(
+            s.bms_hello === "standby"
+              ? ((s.notification) || "Standby: waiting for BMS ok…")
+              : "Reconnecting to BMS…"
+          );
+          const ok = await waitForBms(BMS_READY_WAIT_SECONDS);
           if (ok) await afterBmsOk();
           return s;
         }
@@ -351,11 +385,12 @@ PAGE = r"""<!DOCTYPE html>
       if (status.bms_hello !== "ok") {
         show("secOwner", false);
         show("secReset", false);
+        show("secDone", false);
         return;
       }
       // If QR admin is still pending (e.g. hello failed during countdown), apply now.
       if (status.admin_bootstrap) {
-        if (await tryQrAdminBootstrap()) return;
+        if (await tryQrAdminBootstrap(true)) return;
       }
       let owner;
       try {
@@ -375,6 +410,7 @@ PAGE = r"""<!DOCTYPE html>
         const dest = publicRedirectUrl(status);
         document.getElementById("doneHint").textContent =
           "Admin is set. Redirecting to " + dest + " …";
+        // Only redirect when BMS hello is ok (caller already gated).
         try { window.location.replace(dest); } catch (e) {}
         return;
       }
@@ -438,16 +474,16 @@ PAGE = r"""<!DOCTYPE html>
         } catch (e) {
           setMsg(waitMsg, "WG apply call failed; still waiting for BMS. " + (e.message || ""), true);
         }
-        const ok = await waitForBms(BMS_WAIT_SECONDS);
+        const ok = await waitForBms(BMS_READY_WAIT_SECONDS);
         if (ok) await afterBmsOk();
         return out;
       }
 
       setMsg(msgEl, "Saved from " + source + ". Checking BMS hello…");
-      const hello = await fetch("/api/hello", { method: "POST" });
-      const helloBody = await hello.json();
-      if (!hello.ok) throw new Error(helloBody.error || "BMS hello failed");
-      await afterBmsOk();
+      enterWaitMode("Waiting for BMS ready (ok)…");
+      const ok = await waitForBms(BMS_READY_WAIT_SECONDS);
+      if (ok) await afterBmsOk();
+      else throw new Error("BMS hello did not become ok in time");
       return out;
     }
 
@@ -631,7 +667,7 @@ PAGE = r"""<!DOCTYPE html>
       try {
         await fetch("/api/wg/apply", { method: "POST" });
       } catch (e) {}
-      const ok = await waitForBms(BMS_WAIT_SECONDS);
+      const ok = await waitForBms(BMS_READY_WAIT_SECONDS);
       if (ok) await afterBmsOk();
     };
 
@@ -641,8 +677,12 @@ PAGE = r"""<!DOCTYPE html>
       if (s && s.enrolled) {
         if (s.bms_hello === "ok") await afterBmsOk();
         else {
-          enterWaitMode("Still waiting for BMS…");
-          const ok = await waitForBms(BMS_WAIT_SECONDS);
+          enterWaitMode(
+            s.bms_hello === "standby"
+              ? ((s.notification) || "Standby: waiting for BMS ok…")
+              : "Still waiting for BMS…"
+          );
+          const ok = await waitForBms(BMS_READY_WAIT_SECONDS);
           if (ok) await afterBmsOk();
         }
         return;
@@ -665,10 +705,17 @@ PAGE = r"""<!DOCTYPE html>
       });
       const out = await r.json();
       if (!r.ok) { setMsg(ownerMsg, out.error || out.hint || "Create failed", true); return; }
-      setMsg(ownerMsg, "Admin created. Redirecting…");
+      setMsg(ownerMsg, "Admin created. Checking BMS ready before redirect…");
       document.getElementById("ownerPass").value = "";
       document.getElementById("ownerPass2").value = "";
-      const dest = out.redirect || publicRedirectUrl(await refresh() || {});
+      enterWaitMode("Waiting for BMS ok before opening public URL…");
+      const ready = await waitForBms(BMS_READY_WAIT_SECONDS);
+      if (!ready) {
+        setMsg(ownerMsg, "Admin saved locally, but BMS did not report ok yet. Retry wait.", true);
+        return;
+      }
+      const dest = publicRedirectUrl(await refresh() || {});
+      setMsg(ownerMsg, "BMS ok. Redirecting…");
       try { window.location.replace(dest); } catch (e) {}
     };
 
@@ -769,8 +816,11 @@ def enriched_status() -> dict:
         st["bms_ha_hostname"] = bms_host
     if st.get("enrolled"):
         hello = _bms_hello()
-        st["bms_hello"] = hello.get("bms_hello") or ("ok" if hello.get("ok") else "failed")
-        if hello.get("ok"):
+        state = hello.get("bms_hello") or ("ok" if hello.get("ok") else "failed")
+        st["bms_hello"] = state
+        if hello.get("notification"):
+            st["notification"] = hello.get("notification")
+        if hello.get("reachable") or state in ("ok", "standby"):
             st["allow_password_reset"] = bool(
                 hello.get("allow_password_reset") or st["allow_password_reset"]
             )
@@ -778,7 +828,7 @@ def enriched_status() -> dict:
             if bms_host:
                 st["ha_hostname"] = bms_host
                 _sync_enroll_hostname(bms_host)
-        else:
+        if state == "failed":
             st["bms_hello_error"] = hello.get("error")
         st["public_url"] = _public_redirect_url(st)
     else:
@@ -897,7 +947,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"ok": True, "status": enriched_status()})
             return
         if path == "/api/hello":
-            self._json(200 if _bms_hello().get("ok") else 502, _bms_hello())
+            hello = _bms_hello()
+            # 200 while reachable (standby or ok); 502 only when unreachable/failed.
+            code = 200 if hello.get("reachable") or hello.get("bms_hello") in ("ok", "standby") else 502
+            self._json(code, hello)
             return
         if path == "/api/owner-bootstrap":
             creds = load_admin_bootstrap()
