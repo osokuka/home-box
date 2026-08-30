@@ -192,6 +192,14 @@ def save_enroll(payload: dict) -> dict:
     tmp.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
 
+    # Drop stale BMS cache from a previous enroll — QR is the source of truth now.
+    try:
+        from bms_runtime import clear_runtime
+
+        clear_runtime()
+    except Exception:
+        pass
+
     if admin_creds:
         save_admin_bootstrap(admin_creds)
     else:
@@ -210,6 +218,13 @@ def clear_enroll() -> bool:
         removed = True
     if clear_wg():
         removed = True
+    try:
+        from bms_runtime import clear_runtime
+
+        if clear_runtime():
+            removed = True
+    except Exception:
+        pass
     return removed
 
 

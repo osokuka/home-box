@@ -203,12 +203,17 @@ def bms_hello() -> dict[str, Any]:
 
     state, notification = _readiness(snap if isinstance(snap, dict) else {})
     machine = snap.get("machine") if isinstance(snap.get("machine"), dict) else {}
+    household = snap.get("household") if isinstance(snap.get("household"), dict) else {}
+    ha_hostname = str(
+        machine.get("ha_hostname") or household.get("ha_hostname") or ""
+    ).strip()
     return {
         "ok": state == "ok",
         "reachable": True,
         "bms_hello": state,
         "notification": notification,
-        "slug": (snap.get("household") or {}).get("slug"),
+        "slug": household.get("slug"),
+        "ha_hostname": ha_hostname,
         "handover_state": machine.get("handover_state"),
         "allow_password_reset": bool(machine.get("allow_password_reset")),
         "unique_id": snap.get("unique_id") or snap.get("appliance_uid"),

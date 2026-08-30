@@ -51,6 +51,14 @@ def save_runtime_from_snapshot(snap: dict[str, Any]) -> dict[str, Any]:
     return body
 
 
+def clear_runtime() -> bool:
+    path = runtime_path()
+    if path.is_file():
+        path.unlink()
+        return True
+    return False
+
+
 def load_runtime() -> dict[str, Any] | None:
     path = runtime_path()
     if not path.is_file():
@@ -60,3 +68,14 @@ def load_runtime() -> dict[str, Any] | None:
     except Exception:
         return None
     return data if isinstance(data, dict) else None
+
+
+def runtime_matches_uid(uid: str) -> bool:
+    """True when cached runtime belongs to this enroll unique_id (not a past box)."""
+    if not uid:
+        return False
+    data = load_runtime()
+    if not data:
+        return False
+    cached = str(data.get("unique_id") or "").strip()
+    return bool(cached) and cached == uid.strip()

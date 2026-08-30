@@ -104,6 +104,8 @@ Subscription / hello may include any of:
 
 Home Box treats connectivity success with no gate field as **`ok`** (older BMS). When BMS sends **`standby`**, the enroll UI waits (up to ~5 minutes) until **`ok`** before redirecting.
 
+**Redirect hostname** always comes from the **current QR** `ha_hostname` (saved in `bms_enroll.json`). Stale `bms_runtime.json` from a previous enroll is cleared on save/clear and is never used to override the QR host.
+
 ## Apply the tunnel
 
 | Host | How |

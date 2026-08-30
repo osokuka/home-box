@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from bms_runtime import load_runtime
+from bms_runtime import load_runtime, runtime_matches_uid
 from enroll_store import (
     clear_admin_bootstrap,
     clear_enroll,
@@ -312,7 +312,8 @@ PAGE = r"""<!DOCTYPE html>
     }
 
     function publicRedirectUrl(s) {
-      const host = String((s && (s.bms_ha_hostname || s.ha_hostname)) || "")
+      // QR / enroll ha_hostname is source of truth — never prefer a stale BMS cache host.
+      const host = String((s && (s.ha_hostname || s.bms_ha_hostname)) || "")
         .replace(/^https?:\/\//, "")
         .split("/")[0]
         .trim();
@@ -333,12 +334,12 @@ PAGE = r"""<!DOCTYPE html>
         : "<br>WireGuard: <code>not in QR</code>";
       const pub = publicRedirectUrl(s);
       document.getElementById("haLink").href = pub;
-      document.getElementById("haLink").textContent = "Open " + (s.bms_ha_hostname || s.ha_hostname || "Home Box");
+      document.getElementById("haLink").textContent = "Open " + (s.ha_hostname || s.bms_ha_hostname || "Home Box");
 
       if (s.enrolled) {
         statusEl.className = "status ok";
         statusEl.innerHTML = "<strong>Enrolled</strong> — admin setup only<br>unique ID <code>" + s.unique_id +
-          "</code><br>hostname <code>" + (s.bms_ha_hostname || s.ha_hostname || "—") +
+          "</code><br>hostname <code>" + (s.ha_hostname || s.bms_ha_hostname || "—") +
           "</code><br>platform_url <code>" + (s.platform_url || "—") +
           "</code><br>BMS hello: <code>" + (s.bms_hello || "—") +
           "</code>" + (s.notification ? (" — " + s.notification) : "") +
@@ -753,7 +754,8 @@ def _bms_hello() -> dict:
 
 
 def _public_redirect_url(st: dict) -> str:
-    host = str(st.get("bms_ha_hostname") or st.get("ha_hostname") or "").strip()
+    """Redirect target from current enroll QR hostname (not stale runtime)."""
+    host = str(st.get("ha_hostname") or st.get("bms_ha_hostname") or "").strip()
     host = host.replace("https://", "").replace("http://", "").split("/")[0].strip()
     if host:
         return f"https://{host}"
@@ -801,19 +803,25 @@ def _ha_proxy(method: str, path: str, body: dict | None = None) -> tuple[int, di
 
 def enriched_status() -> dict:
     st = public_status()
+    enroll = load_enroll() or {}
+    enroll_uid = str(enroll.get("unique_id") or st.get("unique_id") or "").strip()
+    qr_host = str(enroll.get("ha_hostname") or st.get("ha_hostname") or "").strip()
+
+    # Runtime only for same unique_id (never a previous box's hostname).
     runtime = load_runtime() or {}
+    if not runtime_matches_uid(enroll_uid):
+        runtime = {}
+
     st["allow_reset"] = ALLOW_RESET
     st["allow_password_reset"] = bool(
         runtime.get("allow_password_reset")
         or ((runtime.get("machine") or {}).get("allow_password_reset"))
     )
-    bms_host = (
-        ((runtime.get("machine") or {}).get("ha_hostname"))
-        or ((runtime.get("household") or {}).get("ha_hostname"))
-        or ""
-    )
-    if bms_host:
-        st["bms_ha_hostname"] = bms_host
+    # QR ha_hostname wins for redirect / display.
+    if qr_host:
+        st["ha_hostname"] = qr_host
+
+    live_host = ""
     if st.get("enrolled"):
         hello = _bms_hello()
         state = hello.get("bms_hello") or ("ok" if hello.get("ok") else "failed")
@@ -825,30 +833,26 @@ def enriched_status() -> dict:
                 hello.get("allow_password_reset") or st["allow_password_reset"]
             )
             st["handover_state"] = hello.get("handover_state")
-            if bms_host:
-                st["ha_hostname"] = bms_host
-                _sync_enroll_hostname(bms_host)
+            hello_uid = str(hello.get("unique_id") or "").strip()
+            # Accept live hostname only when it belongs to this QR enroll.
+            if hello_uid and hello_uid == enroll_uid:
+                live_host = str(hello.get("ha_hostname") or "").strip()
         if state == "failed":
             st["bms_hello_error"] = hello.get("error")
-        st["public_url"] = _public_redirect_url(st)
+
+        if live_host and not qr_host:
+            st["ha_hostname"] = live_host
+            st["bms_ha_hostname"] = live_host
+        elif qr_host:
+            st["bms_ha_hostname"] = qr_host
+        elif live_host:
+            st["bms_ha_hostname"] = live_host
+
+        redirect = _public_redirect_url(st)
+        st["public_url"] = redirect
     else:
         st["bms_hello"] = "n/a"
     return st
-
-
-def _sync_enroll_hostname(hostname: str) -> None:
-    """Keep enroll file hostname aligned with BMS (slug.bms.…)."""
-    data = load_enroll()
-    if not data or data.get("ha_hostname") == hostname:
-        return
-    try:
-        from enroll_store import enroll_path
-
-        data["ha_hostname"] = hostname
-        path = enroll_path()
-        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    except Exception:
-        pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -983,12 +987,14 @@ class Handler(BaseHTTPRequestHandler):
                         pass
                 if isinstance(body, dict):
                     body["ok"] = True
-                    body["redirect"] = _public_redirect_url(enriched_status())
+                    st = enriched_status()
+                    body["redirect"] = _public_redirect_url(st)
                     body["username"] = creds["username"]
-                print(
-                    f"enroll-ui admin bootstrap ok user={creds['username']}",
-                    flush=True,
-                )
+                    print(
+                        f"enroll-ui admin bootstrap ok user={creds['username']} "
+                        f"redirect={body['redirect']}",
+                        flush=True,
+                    )
             else:
                 if isinstance(body, dict):
                     body.setdefault("ok", False)
@@ -1019,6 +1025,10 @@ class Handler(BaseHTTPRequestHandler):
             code, body = _ha_proxy("POST", "/api/home_box/owner", payload)
             if code < 400 and isinstance(body, dict):
                 body["redirect"] = _public_redirect_url(enriched_status())
+                print(
+                    f"enroll-ui owner created redirect={body.get('redirect')}",
+                    flush=True,
+                )
             self._json(code, body)
             return
         if path == "/api/password-reset":
