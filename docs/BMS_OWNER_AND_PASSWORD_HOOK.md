@@ -11,7 +11,7 @@ Related Home Box UI: enroll service `:8099` (after QR + successful BMS hello).
 
 | Rule | Detail |
 | --- | --- |
-| No passwords in QR | Enroll QR stays `{v, unique_id, enroll_token, ha_hostname}` (+ optional platform URL). **Never** `password`, `username`, or hashed credentials. |
+| No passwords in QR (legacy) | Prefer local password form. **Optional** one-time `admin: {name, username, password}` in QR is now accepted for seamless setup; Home Box consumes it once and never echoes it back. |
 | No passwords in snapshot | Ingest subscription/heartbeat payloads must **never** include user passwords. |
 | BMS switch = enablement only | Staff toggles whether the **box may show** local password UI. |
 | User sees password on box | Household enters / confirms the new password on Home Box (`:8099`). BMS operators do not see it. |

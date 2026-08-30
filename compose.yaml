@@ -26,7 +26,10 @@ services:
       - ha
 
   platform-agent:
-    image: python:3.12-alpine
+    build:
+      context: ./platform
+      dockerfile: Dockerfile.enroll
+    image: home-box-enroll:local
     container_name: home-box-agent
     restart: unless-stopped
     working_dir: /app
@@ -35,7 +38,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       TZ: ${TZ:-Europe/Amsterdam}
-      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-http://host.docker.internal:8080}
+      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-}
       BMS_ENROLL_TOKEN: ${BMS_ENROLL_TOKEN:-}
       BMS_APPLIANCE_UID: ${BMS_APPLIANCE_UID:-}
       BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
@@ -43,12 +46,16 @@ services:
       BMS_INTERVAL: ${BMS_INTERVAL:-20}
       BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-climate.heat_pump}
       HA_CONFIG: /config
+      HOME_BOX_WG_CONTAINER: home-box-wireguard
     volumes:
       - ./platform/agent.py:/app/agent.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
+      - ./platform/wg_store.py:/app/wg_store.py:ro
+      - ./platform/bms_fetch.py:/app/bms_fetch.py:ro
       - ./platform/bms_runtime.py:/app/bms_runtime.py:ro
       - ./platform/bms_share.py:/app/bms_share.py:ro
       - ./config:/config
+      - /var/run/docker.sock:/var/run/docker.sock
     command: ["python", "-u", "/app/agent.py"]
     depends_on:
       - homeassistant
@@ -56,7 +63,10 @@ services:
       - ha
 
   enroll-ui:
-    image: python:3.12-alpine
+    build:
+      context: ./platform
+      dockerfile: Dockerfile.enroll
+    image: home-box-enroll:local
     container_name: home-box-enroll
     restart: unless-stopped
     working_dir: /app
@@ -64,21 +74,73 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       TZ: ${TZ:-Europe/Amsterdam}
-      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-http://host.docker.internal:8080}
+      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-}
       BMS_ENROLL_UI_PORT: "8099"
       BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
       HA_CONFIG: /config
+      HOME_BOX_ROOT: /workspace
+      HOME_BOX_WG_SERVICE: wireguard
+      HOME_BOX_WG_CONTAINER: home-box-wireguard
+      # Lab/tech only. Default off — enrolled boxes cannot be cleared via the UI/API.
+      ENROLL_ALLOW_RESET: ${ENROLL_ALLOW_RESET:-0}
+      HOME_BOX_OPEN_URL: ${HOME_BOX_OPEN_URL:-http://127.0.0.1:8123}
     ports:
+      # LAN reachable for first-run phone QR scan; after enroll the QR page is locked server-side.
       - "8099:8099"
     volumes:
       - ./platform/enroll_ui.py:/app/enroll_ui.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
+      - ./platform/wg_store.py:/app/wg_store.py:ro
+      - ./platform/bms_fetch.py:/app/bms_fetch.py:ro
       - ./platform/bms_runtime.py:/app/bms_runtime.py:ro
       - ./platform/static:/app/static:ro
       - ./config:/config
+      - ./:/workspace:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     command: ["python", "-u", "/app/enroll_ui.py"]
     networks:
       - ha
+
+  # Optional WireGuard client (Linux / Pi host with kernel WG). Not for Windows Docker Desktop.
+  # Conf is written from enroll QR to config/wireguard/wg0.conf
+  wireguard:
+    profiles: ["wireguard"]
+    image: lscr.io/linuxserver/wireguard:1.0.20210914-r4-ls50
+    container_name: home-box-wireguard
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      TZ: ${TZ:-Europe/Amsterdam}
+      PUID: "0"
+      PGID: "0"
+    volumes:
+      - ./config/wireguard:/config
+      - /lib/modules:/lib/modules:ro
+    ports:
+      - "51820:51820/udp"
+    networks:
+      - ha
+
+  # Publish Home Box UI on the WireGuard address (10.10.x.y:8123) for CF/NPM edge.
+  # Shares the WG container netns; forwards to homeassistant on the compose network.
+  wg-ha-proxy:
+    profiles: ["wireguard"]
+    image: alpine/socat:1.8.0.0
+    container_name: home-box-wg-ha-proxy
+    restart: unless-stopped
+    network_mode: "service:wireguard"
+    depends_on:
+      - wireguard
+      - homeassistant
+    command:
+      [
+        "TCP-LISTEN:8123,fork,reuseaddr,bind=0.0.0.0",
+        "TCP:homeassistant:8123",
+      ]
 
   tuya-import:
     build:

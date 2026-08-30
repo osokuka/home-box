@@ -2,6 +2,9 @@
 config/secrets.yaml
 config/bms_enroll.json
 config/bms_enroll.tmp
+config/bms_runtime.json
+config/bms_admin_bootstrap.json
+config/wireguard/
 config/tuya_import_queue.json
 config/tuya_import_queue.tmp
 config/.storage/

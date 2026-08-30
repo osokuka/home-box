@@ -19,12 +19,29 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from bms_runtime import load_runtime
-from enroll_store import clear_enroll, load_enroll, public_status, save_enroll
+from enroll_store import (
+    clear_admin_bootstrap,
+    clear_enroll,
+    has_admin_bootstrap,
+    load_admin_bootstrap,
+    load_enroll,
+    public_status,
+    save_enroll,
+)
+from wg_store import apply_wireguard, has_wg_conf
 
 PORT = int(os.environ.get("BMS_ENROLL_UI_PORT", "8099"))
-DEFAULT_PLATFORM = os.environ.get("BMS_PLATFORM_URL", "http://host.docker.internal:8080").rstrip("/")
+DEFAULT_PLATFORM = os.environ.get("BMS_PLATFORM_URL", "").strip().rstrip("/")
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
 STATIC_DIR = Path(os.environ.get("BMS_ENROLL_STATIC", "/app/static"))
+HA_OPEN_URL = os.environ.get("HOME_BOX_OPEN_URL", "http://127.0.0.1:8123").rstrip("/")
+
+
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+ALLOW_RESET = _env_flag("ENROLL_ALLOW_RESET", "0")
 
 PAGE = r"""<!DOCTYPE html>
 <html lang="en">
@@ -62,16 +79,29 @@ PAGE = r"""<!DOCTYPE html>
     .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: .75rem; }
     .row button { margin-top: 0; }
     .steps { font-size: .85rem; color: var(--muted); margin-bottom: 1rem; }
+    .countdown { font-size: 3.5rem; font-weight: 600; letter-spacing: -0.04em; line-height: 1; margin: .75rem 0 .35rem; color: var(--acc); }
+    .countdown-sub { color: var(--muted); font-size: .95rem; line-height: 1.45; margin: 0; }
   </style>
   <script src="/static/jsQR.min.js"></script>
 </head>
 <body>
   <main>
     <h1>Home Box enroll</h1>
-    <p class="sub">Scan the BMS QR (unique ID + enroll token only — never a password). After BMS hello succeeds, set your Home Box admin login on this page.</p>
-    <p class="steps">1 · QR → 2 · BMS hello → 3 · Home Box admin password (local)</p>
+    <p class="sub">Scan the BMS QR (enroll + optional WireGuard + optional one-time admin). After BMS is reachable, admin is created from the QR when present, otherwise you set the password here.</p>
+    <p class="steps">1 · QR (+ WG + admin) → 2 · Wait for BMS → 3 · Admin ready → public hostname</p>
 
     <section id="status" class="status idle">Loading…</section>
+
+    <section id="secWait" class="hidden">
+      <h2>Connecting to BMS</h2>
+      <p class="countdown" id="countdownNum">45</p>
+      <p class="countdown-sub" id="countdownHint">Applying WireGuard keys and waiting until BMS is reachable…</p>
+      <div class="msg" id="waitMsg"></div>
+      <div class="row" id="waitActions" style="display:none;">
+        <button type="button" id="retryWait">Retry wait</button>
+        <button type="button" class="ghost" id="skipToEnroll">Continue setup</button>
+      </div>
+    </section>
 
     <section id="secEnroll">
       <h2>1. Scan BMS QR</h2>
@@ -91,23 +121,23 @@ PAGE = r"""<!DOCTYPE html>
 
       <h2 style="margin-top:1.25rem;">Or paste</h2>
       <label for="raw">QR JSON</label>
-      <textarea id="raw" placeholder='{"v":1,"unique_id":"…","enroll_token":"bms_…","ha_hostname":"slug.ha.localhost"}'></textarea>
-      <label for="platform">Platform URL (optional)</label>
-      <input id="platform" value="__PLATFORM__" />
+      <textarea id="raw" placeholder='{"v":2,"unique_id":"…","enroll_token":"bms_…","ha_hostname":"slug.ha.…","wireguard":{"role":"box","config":"[Interface]…"}}'></textarea>
+      <label for="platform">Platform URL (optional override — leave empty to use QR)</label>
+      <input id="platform" value="" placeholder="from QR, e.g. http://10.10.0.1" />
       <label for="uid">Or unique ID</label>
       <input id="uid" autocomplete="off" />
       <label for="token">Enroll token</label>
       <input id="token" autocomplete="off" />
       <label for="host">HA hostname</label>
       <input id="host" placeholder="windows-lab.ha.localhost" />
-      <button type="button" id="save">Save enroll &amp; hello BMS</button>
-      <button type="button" class="ghost" id="clear">Clear enroll</button>
+      <button type="button" id="save">Save enroll &amp; connect</button>
+      <button type="button" class="ghost hidden" id="clear">Clear enroll (tech)</button>
       <div class="msg" id="msg"></div>
     </section>
 
     <section id="secOwner" class="hidden">
-      <h2>2. Home Box admin setup</h2>
-      <p class="hint">Create the owner login for this box. The password is stored only in Home Box — not in BMS and not in the QR.</p>
+      <h2>3. Home Box admin registration</h2>
+      <p class="hint">Create the client admin login if the QR did not include one-time <code>admin</code> credentials. Password stays on this box.</p>
       <label for="ownerName">Display name</label>
       <input id="ownerName" autocomplete="name" />
       <label for="ownerUser">Username</label>
@@ -136,7 +166,7 @@ PAGE = r"""<!DOCTYPE html>
     <section id="secDone" class="hidden">
       <h2>Ready</h2>
       <p class="hint" id="doneHint">Open Home Box and sign in with the username you set.</p>
-      <p><a id="haLink" href="http://127.0.0.1:8123" target="_blank" rel="noopener">Open Home Box UI</a></p>
+      <p><a id="haLink" href="__HA_OPEN__" target="_blank" rel="noopener">Open Home Box UI</a></p>
     </section>
   </main>
   <script>
@@ -145,6 +175,7 @@ PAGE = r"""<!DOCTYPE html>
     const scanMsg = document.getElementById("scanMsg");
     const ownerMsg = document.getElementById("ownerMsg");
     const resetMsg = document.getElementById("resetMsg");
+    const waitMsg = document.getElementById("waitMsg");
     const video = document.getElementById("video");
     const overlay = document.getElementById("overlay");
     const capture = document.getElementById("capture");
@@ -154,6 +185,8 @@ PAGE = r"""<!DOCTYPE html>
     let raf = 0;
     let scanning = false;
     let lastSavedKey = "";
+    let waitAbort = false;
+    const BMS_WAIT_SECONDS = 45;
 
     function setMsg(el, text, isErr) {
       el.textContent = text || "";
@@ -164,23 +197,148 @@ PAGE = r"""<!DOCTYPE html>
       document.getElementById(id).classList.toggle("hidden", !on);
     }
 
+    function enterWaitMode(hint) {
+      waitAbort = false;
+      show("secWait", true);
+      show("secEnroll", false);
+      show("secOwner", false);
+      show("secReset", false);
+      show("secDone", false);
+      document.getElementById("waitActions").style.display = "none";
+      document.getElementById("countdownNum").textContent = String(BMS_WAIT_SECONDS);
+      document.getElementById("countdownHint").textContent =
+        hint || "Applying WireGuard keys and waiting until BMS is reachable…";
+      setMsg(waitMsg, "");
+    }
+
+    function leaveWaitMode() {
+      waitAbort = true;
+      show("secWait", false);
+      // Never reopen QR enroll after identity is saved (unless tech reset).
+    }
+
+    async function pollHelloOnce() {
+      const hello = await fetch("/api/hello", { method: "POST" });
+      const helloBody = await hello.json().catch(() => ({}));
+      return { ok: hello.ok && !!(helloBody && helloBody.ok), body: helloBody };
+    }
+
+    async function waitForBms(seconds) {
+      const total = seconds || BMS_WAIT_SECONDS;
+      const numEl = document.getElementById("countdownNum");
+      const hintEl = document.getElementById("countdownHint");
+      const actions = document.getElementById("waitActions");
+      actions.style.display = "none";
+      const deadline = Date.now() + total * 1000;
+      while (!waitAbort && Date.now() < deadline) {
+        const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+        numEl.textContent = String(left);
+        hintEl.textContent = "Waiting for BMS over WireGuard… " + left + "s remaining.";
+        try {
+          const r = await pollHelloOnce();
+          if (r.ok) {
+            numEl.textContent = "0";
+            setMsg(waitMsg, "BMS reached. Continue with admin registration.");
+            return true;
+          }
+          setMsg(waitMsg, (r.body && r.body.error) ? ("Still waiting: " + r.body.error) : "Still waiting for BMS…");
+        } catch (e) {
+          setMsg(waitMsg, "Still waiting: " + (e.message || String(e)));
+        }
+        await new Promise((res) => setTimeout(res, 1000));
+      }
+      if (waitAbort) return false;
+      numEl.textContent = "0";
+      hintEl.textContent = "BMS not reached within " + total + " seconds.";
+      setMsg(waitMsg, "Timed out. Check WireGuard / BMS, then retry.", true);
+      actions.style.display = "flex";
+      return false;
+    }
+
+    async function tryQrAdminBootstrap() {
+      try {
+        const boot = await fetch("/api/owner-bootstrap", { method: "POST" });
+        const bootBody = await boot.json().catch(() => ({}));
+        if (boot.ok && bootBody && bootBody.ok && !bootBody.skipped) {
+          setMsg(msgEl, "Admin created from QR. Redirecting…");
+          const dest = bootBody.redirect || publicRedirectUrl(await refresh() || {});
+          try { window.location.replace(dest); } catch (e) {}
+          return true;
+        }
+      } catch (e) {}
+      return false;
+    }
+
+    async function afterBmsOk() {
+      show("secWait", false);
+      show("secEnroll", false);
+      if (await tryQrAdminBootstrap()) return;
+      setMsg(msgEl, "BMS hello OK. Register the Home Box admin below.");
+      await refresh();
+      show("secOwner", true);
+      const owner = document.getElementById("secOwner");
+      owner.scrollIntoView({ behavior: "smooth", block: "start" });
+      try { location.hash = "admin"; } catch (e) {}
+      try { document.getElementById("ownerUser").focus(); } catch (e) {}
+    }
+
+    function publicRedirectUrl(s) {
+      const host = String((s && (s.bms_ha_hostname || s.ha_hostname)) || "")
+        .replace(/^https?:\/\//, "")
+        .split("/")[0]
+        .trim();
+      if (host) return "https://" + host;
+      return "__HA_OPEN__";
+    }
+
     async function refresh() {
       const r = await fetch("/api/status");
       const s = await r.json();
+      const allowReset = !!s.allow_reset;
+      show("clear", allowReset);
+      const wg = s.wireguard || {};
+      const wgLine = wg.configured
+        ? ("<br>WireGuard: <code>saved</code> " + (wg.address || "") +
+           (wg.endpoint ? (" → <code>" + wg.endpoint + "</code>") : "") +
+           "<br><span class='hint'>" + (wg.apply_hint || "") + "</span>")
+        : "<br>WireGuard: <code>not in QR</code>";
+      const pub = publicRedirectUrl(s);
+      document.getElementById("haLink").href = pub;
+      document.getElementById("haLink").textContent = "Open " + (s.bms_ha_hostname || s.ha_hostname || "Home Box");
+
       if (s.enrolled) {
         statusEl.className = "status ok";
-        statusEl.innerHTML = "<strong>Enrolled</strong><br>unique ID <code>" + s.unique_id +
-          "</code><br>hostname <code>" + (s.ha_hostname || "—") +
+        statusEl.innerHTML = "<strong>Enrolled</strong> — admin setup only<br>unique ID <code>" + s.unique_id +
+          "</code><br>hostname <code>" + (s.bms_ha_hostname || s.ha_hostname || "—") +
+          "</code><br>platform_url <code>" + (s.platform_url || "—") +
           "</code><br>BMS hello: <code>" + (s.bms_hello || "—") +
-          "</code><br>password reset flag: <code>" + (s.allow_password_reset ? "on" : "off") + "</code>";
-        if (s.ha_hostname) {
-          document.getElementById("haLink").href = "http://" + s.ha_hostname.replace(/^https?:\/\//, "") + ":8080";
+          "</code>" + (s.bms_hello_error ? (" <span class='err'>" + s.bms_hello_error + "</span>") : "") +
+          wgLine;
+        // Never show QR enroll again after identity is saved.
+        show("secEnroll", false);
+        if (!document.getElementById("secWait").classList.contains("hidden")) {
+          return s;
         }
-      } else {
-        statusEl.className = "status idle";
-        statusEl.innerHTML = "<strong>Not enrolled</strong> — scan the BMS QR or paste the token.";
+        if (s.bms_hello !== "ok") {
+          enterWaitMode("Reconnecting to BMS…");
+          const ok = await waitForBms(BMS_WAIT_SECONDS);
+          if (ok) await afterBmsOk();
+          return s;
+        }
+        await refreshOwnerPanels(s);
+        return s;
       }
-      await refreshOwnerPanels(s);
+
+      statusEl.className = "status idle";
+      statusEl.innerHTML = "<strong>Not enrolled</strong> — scan the BMS QR from a phone on the LAN." + wgLine;
+      if (!document.getElementById("secWait").classList.contains("hidden")) {
+        return s;
+      }
+      show("secEnroll", true);
+      show("secOwner", false);
+      show("secReset", false);
+      show("secDone", false);
+      return s;
     }
 
     async function refreshOwnerPanels(status) {
@@ -195,6 +353,10 @@ PAGE = r"""<!DOCTYPE html>
         show("secReset", false);
         return;
       }
+      // If QR admin is still pending (e.g. hello failed during countdown), apply now.
+      if (status.admin_bootstrap) {
+        if (await tryQrAdminBootstrap()) return;
+      }
       let owner;
       try {
         const r = await fetch("/api/owner-status");
@@ -204,14 +366,28 @@ PAGE = r"""<!DOCTYPE html>
       }
       const hasOwner = !!(owner && owner.has_owner);
       const resetOn = !!(status.allow_password_reset || (owner && owner.allow_password_reset));
+      show("secEnroll", false);
+      show("secWait", false);
+      if (hasOwner && !resetOn) {
+        show("secOwner", false);
+        show("secReset", false);
+        show("secDone", true);
+        const dest = publicRedirectUrl(status);
+        document.getElementById("doneHint").textContent =
+          "Admin is set. Redirecting to " + dest + " …";
+        try { window.location.replace(dest); } catch (e) {}
+        return;
+      }
       show("secOwner", !hasOwner);
       show("secReset", hasOwner && resetOn);
-      show("secDone", hasOwner && !resetOn);
+      show("secDone", false);
+      if (!hasOwner) {
+        try { location.hash = "admin"; } catch (e) {}
+        try { document.getElementById("ownerUser").focus(); } catch (e) {}
+      }
       if (owner && owner.users && owner.users.length) {
         const u = owner.users.find((x) => x.is_owner) || owner.users[0];
         if (u && u.username) document.getElementById("resetUser").value = u.username;
-        document.getElementById("doneHint").textContent =
-          "Sign in to Home Box as " + (u.username || u.name || "owner") + ". Password is only on this box.";
       }
     }
 
@@ -224,8 +400,16 @@ PAGE = r"""<!DOCTYPE html>
     }
 
     async function savePayload(body, source) {
-      const platform = document.getElementById("platform").value.trim();
-      if (platform) body.platform_url = platform;
+      // QR platform_url wins. Form only fills when QR omitted it (never clobber with lab default).
+      const platformField = document.getElementById("platform").value.trim();
+      const fromQr = (body.platform_url || "").trim();
+      if (fromQr) {
+        body.platform_url = fromQr.replace(/\/$/, "");
+      } else if (platformField) {
+        body.platform_url = platformField.replace(/\/$/, "");
+      } else {
+        delete body.platform_url;
+      }
       const r = await fetch("/api/enroll", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -234,13 +418,36 @@ PAGE = r"""<!DOCTYPE html>
       const out = await r.json();
       if (!r.ok) throw new Error(out.error || "Save failed");
       fillFromPayload(body);
-      setMsg(msgEl, "Saved from " + source + ". Checking BMS hello…");
+      const st = (out && out.status) || {};
+      const savedPlatform = (st.platform_url || body.platform_url || "");
+      const hasWg = !!(body.wireguard || (st.wireguard && st.wireguard.configured));
+      setMsg(msgEl, "Saved from " + source + (savedPlatform ? (". platform_url=" + savedPlatform) : "."));
       setMsg(scanMsg, "QR accepted (" + source + ").");
+
+      if (hasWg) {
+        enterWaitMode("Restarting WireGuard with keys from the QR…");
+        try {
+          const apply = await fetch("/api/wg/apply", { method: "POST" });
+          const applyBody = await apply.json().catch(() => ({}));
+          const hint = (applyBody && applyBody.hint) || "";
+          document.getElementById("countdownHint").textContent =
+            (applyBody && applyBody.mode === "restarted")
+              ? "WireGuard restarted. Waiting for BMS…"
+              : ("WireGuard keys saved. " + (hint || "Waiting for BMS…"));
+          setMsg(waitMsg, hint || "");
+        } catch (e) {
+          setMsg(waitMsg, "WG apply call failed; still waiting for BMS. " + (e.message || ""), true);
+        }
+        const ok = await waitForBms(BMS_WAIT_SECONDS);
+        if (ok) await afterBmsOk();
+        return out;
+      }
+
+      setMsg(msgEl, "Saved from " + source + ". Checking BMS hello…");
       const hello = await fetch("/api/hello", { method: "POST" });
       const helloBody = await hello.json();
       if (!hello.ok) throw new Error(helloBody.error || "BMS hello failed");
-      setMsg(msgEl, "BMS hello OK. Continue with Home Box admin setup below.");
-      await refresh();
+      await afterBmsOk();
       return out;
     }
 
@@ -254,11 +461,12 @@ PAGE = r"""<!DOCTYPE html>
       if (!body.enroll_token || !(body.unique_id || body.appliance_uid)) {
         throw new Error("QR missing enroll_token or unique_id");
       }
-      if (body.password || body.username && body.enroll_token && body.password) {
-        /* ignore any accidental credential fields — never use them */
+      if (body.password && !body.admin) {
+        /* top-level password without admin{} is ignored */
       }
       delete body.password;
       delete body.user_password;
+      // Keep body.admin { username, password } for one-time bootstrap.
       return body;
     }
 
@@ -405,11 +613,42 @@ PAGE = r"""<!DOCTYPE html>
     };
 
     document.getElementById("clear").onclick = async () => {
-      await fetch("/api/enroll", { method: "DELETE" });
+      const r = await fetch("/api/enroll", { method: "DELETE" });
+      const out = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsg(msgEl, out.error || "Clear blocked", true);
+        return;
+      }
       lastSavedKey = "";
+      leaveWaitMode();
       setMsg(msgEl, "Cleared.");
       setMsg(scanMsg, "");
       await refresh();
+    };
+
+    document.getElementById("retryWait").onclick = async () => {
+      enterWaitMode("Retrying WireGuard apply and BMS wait…");
+      try {
+        await fetch("/api/wg/apply", { method: "POST" });
+      } catch (e) {}
+      const ok = await waitForBms(BMS_WAIT_SECONDS);
+      if (ok) await afterBmsOk();
+    };
+
+    document.getElementById("skipToEnroll").onclick = async () => {
+      leaveWaitMode();
+      const s = await refresh();
+      if (s && s.enrolled) {
+        if (s.bms_hello === "ok") await afterBmsOk();
+        else {
+          enterWaitMode("Still waiting for BMS…");
+          const ok = await waitForBms(BMS_WAIT_SECONDS);
+          if (ok) await afterBmsOk();
+        }
+        return;
+      }
+      show("secEnroll", true);
+      setMsg(msgEl, "Scan the BMS QR to continue.");
     };
 
     document.getElementById("createOwner").onclick = async () => {
@@ -426,10 +665,11 @@ PAGE = r"""<!DOCTYPE html>
       });
       const out = await r.json();
       if (!r.ok) { setMsg(ownerMsg, out.error || out.hint || "Create failed", true); return; }
-      setMsg(ownerMsg, "Admin created. Username: " + out.username + ". Password stays on this box.");
+      setMsg(ownerMsg, "Admin created. Redirecting…");
       document.getElementById("ownerPass").value = "";
       document.getElementById("ownerPass2").value = "";
-      await refresh();
+      const dest = out.redirect || publicRedirectUrl(await refresh() || {});
+      try { window.location.replace(dest); } catch (e) {}
     };
 
     document.getElementById("doReset").onclick = async () => {
@@ -456,39 +696,26 @@ PAGE = r"""<!DOCTYPE html>
   </script>
 </body>
 </html>
-""".replace("__PLATFORM__", DEFAULT_PLATFORM)
+""".replace("__HA_OPEN__", HA_OPEN_URL)
 
 
 def _bms_hello() -> dict:
-    data = load_enroll()
-    if not data:
-        return {"ok": False, "error": "not_enrolled"}
-    platform = str(data.get("platform_url") or DEFAULT_PLATFORM).rstrip("/")
-    token = str(data.get("enroll_token") or "").strip()
-    req = urllib.request.Request(
-        f"{platform}/api/v1/ingest/subscription/",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-        },
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            snap = json.loads(resp.read().decode())
-        return {
-            "ok": True,
-            "bms_hello": "ok",
-            "slug": (snap.get("household") or {}).get("slug"),
-            "handover_state": (snap.get("machine") or {}).get("handover_state"),
-            "allow_password_reset": bool((snap.get("machine") or {}).get("allow_password_reset")),
-            "unique_id": snap.get("unique_id") or snap.get("appliance_uid"),
-        }
-    except urllib.error.HTTPError as err:
-        body = err.read().decode(errors="replace")[:300]
-        return {"ok": False, "error": f"BMS HTTP {err.code}: {body}", "bms_hello": "failed"}
-    except Exception as err:
-        return {"ok": False, "error": str(err), "bms_hello": "failed"}
+    from bms_fetch import bms_hello
+
+    return bms_hello()
+
+
+def _public_redirect_url(st: dict) -> str:
+    host = str(st.get("bms_ha_hostname") or st.get("ha_hostname") or "").strip()
+    host = host.replace("https://", "").replace("http://", "").split("/")[0].strip()
+    if host:
+        return f"https://{host}"
+    return HA_OPEN_URL
+
+
+def _enroll_locked() -> bool:
+    """True after first successful QR save — QR enroll UI must not reopen."""
+    return load_enroll() is not None and not ALLOW_RESET
 
 
 def _ha_proxy(method: str, path: str, body: dict | None = None) -> tuple[int, dict]:
@@ -528,10 +755,18 @@ def _ha_proxy(method: str, path: str, body: dict | None = None) -> tuple[int, di
 def enriched_status() -> dict:
     st = public_status()
     runtime = load_runtime() or {}
+    st["allow_reset"] = ALLOW_RESET
     st["allow_password_reset"] = bool(
         runtime.get("allow_password_reset")
         or ((runtime.get("machine") or {}).get("allow_password_reset"))
     )
+    bms_host = (
+        ((runtime.get("machine") or {}).get("ha_hostname"))
+        or ((runtime.get("household") or {}).get("ha_hostname"))
+        or ""
+    )
+    if bms_host:
+        st["bms_ha_hostname"] = bms_host
     if st.get("enrolled"):
         hello = _bms_hello()
         st["bms_hello"] = hello.get("bms_hello") or ("ok" if hello.get("ok") else "failed")
@@ -540,11 +775,30 @@ def enriched_status() -> dict:
                 hello.get("allow_password_reset") or st["allow_password_reset"]
             )
             st["handover_state"] = hello.get("handover_state")
+            if bms_host:
+                st["ha_hostname"] = bms_host
+                _sync_enroll_hostname(bms_host)
         else:
             st["bms_hello_error"] = hello.get("error")
+        st["public_url"] = _public_redirect_url(st)
     else:
         st["bms_hello"] = "n/a"
     return st
+
+
+def _sync_enroll_hostname(hostname: str) -> None:
+    """Keep enroll file hostname aligned with BMS (slug.bms.…)."""
+    data = load_enroll()
+    if not data or data.get("ha_hostname") == hostname:
+        return
+    try:
+        from enroll_store import enroll_path
+
+        data["ha_hostname"] = hostname
+        path = enroll_path()
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    except Exception:
+        pass
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -609,11 +863,25 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/enroll":
+            if _enroll_locked():
+                self._json(
+                    403,
+                    {
+                        "ok": False,
+                        "error": "enroll_locked",
+                        "hint": "Box already enrolled. QR enroll is closed. Set ENROLL_ALLOW_RESET=1 only for technician retest.",
+                    },
+                )
+                return
             try:
                 payload = self._read_json()
-                # Strip any credential fields if a bad QR/tool included them
-                for bad in ("password", "user_password", "ha_password", "admin_password"):
+                # Strip loose top-level secrets; nested admin{} is handled by save_enroll.
+                for bad in ("user_password", "ha_password"):
                     payload.pop(bad, None)
+                if "admin" not in payload and "owner" not in payload:
+                    payload.pop("password", None)
+                    payload.pop("admin_password", None)
+                    payload.pop("owner_password", None)
                 saved = save_enroll(payload)
             except ValueError as err:
                 self._json(400, {"error": str(err)})
@@ -621,11 +889,73 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as err:
                 self._json(400, {"error": f"invalid body: {err}"})
                 return
-            print(f"enroll-ui saved unique_id={saved.get('unique_id')}", flush=True)
+            print(
+                f"enroll-ui saved unique_id={saved.get('unique_id')} "
+                f"admin_bootstrap={saved.get('admin_bootstrap')}",
+                flush=True,
+            )
             self._json(200, {"ok": True, "status": enriched_status()})
             return
         if path == "/api/hello":
             self._json(200 if _bms_hello().get("ok") else 502, _bms_hello())
+            return
+        if path == "/api/owner-bootstrap":
+            creds = load_admin_bootstrap()
+            if not creds:
+                self._json(200, {"ok": True, "skipped": True, "reason": "no_admin_in_qr"})
+                return
+            code, body = _ha_proxy(
+                "POST",
+                "/api/home_box/owner",
+                {
+                    "name": creds["name"],
+                    "username": creds["username"],
+                    "password": creds["password"],
+                    "bootstrap": True,
+                },
+            )
+            if code < 400 and isinstance(body, dict) and body.get("ok", True) is not False:
+                clear_admin_bootstrap()
+                # Mark enroll file flag cleared
+                data = load_enroll()
+                if data and data.get("admin_bootstrap"):
+                    data["admin_bootstrap"] = False
+                    try:
+                        from enroll_store import enroll_path
+
+                        enroll_path().write_text(
+                            json.dumps(data, indent=2) + "\n", encoding="utf-8"
+                        )
+                    except Exception:
+                        pass
+                if isinstance(body, dict):
+                    body["ok"] = True
+                    body["redirect"] = _public_redirect_url(enriched_status())
+                    body["username"] = creds["username"]
+                print(
+                    f"enroll-ui admin bootstrap ok user={creds['username']}",
+                    flush=True,
+                )
+            else:
+                if isinstance(body, dict):
+                    body.setdefault("ok", False)
+                print(
+                    f"enroll-ui admin bootstrap failed code={code}",
+                    flush=True,
+                )
+            self._json(code if code >= 400 else 200, body if isinstance(body, dict) else {"ok": False})
+            return
+        if path == "/api/wg/apply":
+            if not has_wg_conf():
+                self._json(400, {"ok": False, "error": "no_wg_conf"})
+                return
+            result = apply_wireguard()
+            code = 200 if result.get("ok") else 500
+            print(
+                f"enroll-ui wg/apply mode={result.get('mode')} exit={result.get('exit_code')}",
+                flush=True,
+            )
+            self._json(code, result)
             return
         if path == "/api/owner":
             try:
@@ -634,6 +964,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": str(err)})
                 return
             code, body = _ha_proxy("POST", "/api/home_box/owner", payload)
+            if code < 400 and isinstance(body, dict):
+                body["redirect"] = _public_redirect_url(enriched_status())
             self._json(code, body)
             return
         if path == "/api/password-reset":
@@ -651,6 +983,16 @@ class Handler(BaseHTTPRequestHandler):
         if urlparse(self.path).path != "/api/enroll":
             self._json(404, {"error": "not_found"})
             return
+        if _enroll_locked():
+            self._json(
+                403,
+                {
+                    "ok": False,
+                    "error": "enroll_locked",
+                    "hint": "Clear enroll disabled after first enroll. Technician: ENROLL_ALLOW_RESET=1 then restart enroll-ui.",
+                },
+            )
+            return
         clear_enroll()
         self._json(200, {"ok": True, "status": enriched_status()})
 
@@ -658,7 +1000,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     print(
-        f"enroll-ui http://0.0.0.0:{PORT}/ qr→hello→owner/reset (ha={HA_URL})",
+        f"enroll-ui http://0.0.0.0:{PORT}/ lan-qr→wg→admin→https://slug.bms… reset={ALLOW_RESET}",
         flush=True,
     )
     server.serve_forever()

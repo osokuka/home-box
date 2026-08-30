@@ -26,6 +26,7 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 | [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md) | CSV / Excel import or manual device add |
 | [docs/TECHNICIAN_SETUP.md](docs/TECHNICIAN_SETUP.md) | On-site device pairing procedure |
 | [docs/OPENCLAW_MCP.md](docs/OPENCLAW_MCP.md) | Read-only MCP for OpenClaw / AI agents |
+| [docs/WIREGUARD_QR.md](docs/WIREGUARD_QR.md) | Accept WG box peer from the same enroll QR |
 | [docs/REBRAND.md](docs/REBRAND.md) | Naming freeze + remaining rebrand phases |
 | [docs/UPSTREAM_HA.md](docs/UPSTREAM_HA.md) | Which Home Assistant org repos matter |
 

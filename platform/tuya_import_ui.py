@@ -1,6 +1,6 @@
-"""Home Box Tuya device import UI — CSV / Excel-as-CSV, or checklist for manual add.
+"""Home Box Tuya device import UI — CSV / Excel (.xlsx), or checklist for manual add.
 
-Never talks to Tuya cloud. Optional apply uses Home Assistant WebSocket + long-lived token.
+Never talks to Tuya cloud. Optional apply uses Home Box WebSocket + long-lived token.
 Listen: BMS_TUYA_IMPORT_PORT (default 8098).
 """
 
@@ -12,7 +12,12 @@ import ssl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from tuya_csv import parse_csv_text, public_device
+from tuya_csv import (
+    devices_to_csv,
+    parse_csv_text,
+    parse_xlsx_base64,
+    public_device,
+)
 
 PORT = int(os.environ.get("BMS_TUYA_IMPORT_PORT", "8098"))
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
@@ -29,7 +34,7 @@ PAGE = """<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Home Box — Tuya import</title>
+  <title>Home Box — device import</title>
   <style>
     :root { --ink:#1a1f1c; --muted:#5c6b63; --line:#c5d0c8; --acc:#2f6f4e; --warn:#8a6d1d; }
     * { box-sizing: border-box; }
@@ -54,18 +59,18 @@ PAGE = """<!DOCTYPE html>
 <body>
   <main>
     <h1>Home Box — Tuya Local import</h1>
-    <p class="sub">Upload a CSV from Excel (<strong>Save As → CSV UTF-8</strong>), or register devices one-by-one in Home Box using <strong>Tuya Local → manual</strong>. This page never uses Tuya cloud.</p>
+    <p class="sub">Bulk-import from <strong>CSV</strong> or <strong>Excel (.xlsx)</strong> after sandbox harvest, or add devices one-by-one with <strong>Tuya Local → manual</strong>. This page never uses Tuya cloud.</p>
 
     <section>
-      <h2>CSV</h2>
-      <p class="hint">Columns: <code>name,device_id,local_key,host,protocol_version,type,poll_only</code></p>
-      <input type="file" id="file" accept=".csv,text/csv" />
+      <h2>CSV / Excel</h2>
+      <p class="hint">Columns: <code>name,device_id,local_key,host,protocol_version,type,poll_only</code> — first sheet if Excel.</p>
+      <input type="file" id="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
       <label class="hint" for="raw" style="display:block;margin-top:.75rem;">Or paste CSV</label>
       <textarea id="raw" placeholder="name,device_id,local_key,host,..."></textarea>
       <div>
-        <button type="button" id="parse">Parse CSV</button>
+        <button type="button" id="parse">Parse</button>
         <button type="button" class="ghost" id="save">Save inventory on box</button>
-        <button type="button" class="ghost" id="apply">Apply via Home Assistant</button>
+        <button type="button" class="ghost" id="apply">Apply on Home Box</button>
         <button type="button" class="ghost" id="clear">Clear inventory</button>
       </div>
       <div class="msg" id="msg"></div>
@@ -82,7 +87,7 @@ PAGE = """<!DOCTYPE html>
       <ol class="hint">
         <li>Home Box → Settings → Devices &amp; services → Add integration → <strong>Tuya Local</strong>.</li>
         <li>Choose <strong>manual</strong> (not cloud).</li>
-        <li>Enter device id, IP, local key from your CSV / sandbox export.</li>
+        <li>Enter device id, IP, local key from your CSV / Excel / sandbox export.</li>
       </ol>
     </section>
   </main>
@@ -90,10 +95,21 @@ PAGE = """<!DOCTYPE html>
     let devices = [];
     const msg = document.getElementById("msg");
     const tableWrap = document.getElementById("tableWrap");
+    const rawEl = document.getElementById("raw");
 
     function setMsg(text, isErr) {
       msg.textContent = text || "";
       msg.className = isErr ? "msg err" : "msg";
+    }
+
+    function arrayBufferToBase64(buf) {
+      const bytes = new Uint8Array(buf);
+      const chunk = 0x8000;
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += chunk) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+      }
+      return btoa(binary);
     }
 
     function render(list) {
@@ -117,14 +133,31 @@ PAGE = """<!DOCTYPE html>
       const j = await r.json();
       render(j.devices || []);
       document.getElementById("tokenHint").textContent = j.ha_token_configured
-        ? "HA token is set — Apply can create Tuya Local entries when devices are on the LAN and type is set."
-        : "No BMS_HA_TOKEN — use Save inventory + manual Tuya Local add, or set a long-lived token to Apply.";
+        ? "Access token is set — Apply can create Tuya Local entries when devices are on the LAN and type is set."
+        : "No access token (BMS_HA_TOKEN) — use Save inventory + manual Tuya Local add, or set a long-lived token to Apply.";
     }
 
     document.getElementById("file").onchange = async (ev) => {
       const f = ev.target.files && ev.target.files[0];
       if (!f) return;
-      document.getElementById("raw").value = await f.text();
+      setMsg("");
+      const name = (f.name || "").toLowerCase();
+      if (name.endsWith(".xlsx")) {
+        const b64 = arrayBufferToBase64(await f.arrayBuffer());
+        const r = await fetch("/api/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ xlsx_base64: b64, filename: f.name }),
+        });
+        const j = await r.json();
+        if (!r.ok) { setMsg((j.errors || [j.error || "Parse failed"]).join("; "), true); return; }
+        if (j.csv) rawEl.value = j.csv;
+        render(j.devices);
+        setMsg("Parsed Excel → " + j.devices.length + " device(s). Save inventory or Apply.");
+        return;
+      }
+      rawEl.value = await f.text();
+      setMsg("Loaded " + f.name + " — click Parse.");
     };
 
     document.getElementById("parse").onclick = async () => {
@@ -132,7 +165,7 @@ PAGE = """<!DOCTYPE html>
       const r = await fetch("/api/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: document.getElementById("raw").value }),
+        body: JSON.stringify({ csv: rawEl.value }),
       });
       const j = await r.json();
       if (!r.ok) { setMsg((j.errors || [j.error || "Parse failed"]).join("; "), true); return; }
@@ -142,14 +175,10 @@ PAGE = """<!DOCTYPE html>
 
     document.getElementById("save").onclick = async () => {
       setMsg("");
-      const body = devices.length
-        ? { devices: null, csv: document.getElementById("raw").value }
-        : { csv: document.getElementById("raw").value };
-      // Always re-parse from textarea so secrets stay server-side from CSV text
       const r = await fetch("/api/queue", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: document.getElementById("raw").value }),
+        body: JSON.stringify({ csv: rawEl.value }),
       });
       const j = await r.json();
       if (!r.ok) { setMsg((j.errors || [j.error || "Save failed"]).join("; "), true); return; }
@@ -162,7 +191,7 @@ PAGE = """<!DOCTYPE html>
       const r = await fetch("/api/apply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: document.getElementById("raw").value || null }),
+        body: JSON.stringify({ csv: rawEl.value || null }),
       });
       const j = await r.json();
       if (!r.ok) { setMsg(j.error || "Apply failed", true); return; }
@@ -173,7 +202,7 @@ PAGE = """<!DOCTYPE html>
 
     document.getElementById("clear").onclick = async () => {
       await fetch("/api/queue", { method: "DELETE" });
-      document.getElementById("raw").value = "";
+      rawEl.value = "";
       render([]);
       setMsg("Cleared.");
     };
@@ -183,6 +212,17 @@ PAGE = """<!DOCTYPE html>
 </body>
 </html>
 """
+
+
+def _parse_body(body: dict) -> tuple[list[dict], list[str], str]:
+    """Return (devices, errors, csv_text)."""
+    if body.get("xlsx_base64"):
+        devices, errors = parse_xlsx_base64(str(body.get("xlsx_base64") or ""))
+        csv_text = devices_to_csv(devices) if devices else ""
+        return devices, errors, csv_text
+    csv_text = str(body.get("csv") or "")
+    devices, errors = parse_csv_text(csv_text)
+    return devices, errors, csv_text
 
 
 def load_queue() -> list[dict]:
@@ -210,7 +250,7 @@ def clear_queue() -> None:
 
 
 def _ws_apply_device(device: dict) -> dict:
-    """Best-effort create tuya_local entry via HA websocket."""
+    """Best-effort create tuya_local entry via Home Box websocket."""
     try:
         import websocket  # type: ignore
     except ImportError:
@@ -247,7 +287,7 @@ def _ws_apply_device(device: dict) -> dict:
         ws.send(json.dumps({"type": "auth", "access_token": HA_TOKEN}))
         auth = json.loads(ws.recv())
         if auth.get("type") != "auth_ok":
-            results["detail"] = "HA auth failed — check BMS_HA_TOKEN"
+            results["detail"] = "auth failed — check BMS_HA_TOKEN"
             ws.close()
             return results
 
@@ -261,7 +301,6 @@ def _ws_apply_device(device: dict) -> dict:
                 if raw.get("id") == pid:
                     return raw
 
-        # Skip if already configured
         entries = call({"type": "config_entries/get"})
         if entries.get("success"):
             for ent in entries.get("result") or []:
@@ -341,7 +380,7 @@ def _ws_apply_device(device: dict) -> dict:
             dtype = (device.get("type") or "").strip()
             if not dtype:
                 results["status"] = "needs_manual"
-                results["detail"] = "connected; pick type in HA UI (CSV type empty)"
+                results["detail"] = "connected; pick type in Home Box UI (CSV type empty)"
                 ws.close()
                 return results
             type_value = dtype if "||" in dtype else f"{dtype}|||"
@@ -349,7 +388,7 @@ def _ws_apply_device(device: dict) -> dict:
             if not step.get("success"):
                 step = progress({"type": dtype})
             if not step.get("success"):
-                results["detail"] = "select_type failed — check CSV type matches a Tuya Local profile"
+                results["detail"] = "select_type failed — check type matches a Tuya Local profile"
                 ws.close()
                 return results
             flow = step.get("result") or {}
@@ -427,18 +466,23 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/parse":
-            devices, errors = parse_csv_text(str(body.get("csv") or ""))
+            devices, errors, csv_text = _parse_body(body)
             if errors and not devices:
                 self._json(400, {"errors": errors})
                 return
             self._json(
                 200,
-                {"devices": [public_device(d) for d in devices], "errors": errors, "count": len(devices)},
+                {
+                    "devices": [public_device(d) for d in devices],
+                    "errors": errors,
+                    "count": len(devices),
+                    "csv": csv_text,
+                },
             )
             return
 
         if path == "/api/queue":
-            devices, errors = parse_csv_text(str(body.get("csv") or ""))
+            devices, errors, _csv_text = _parse_body(body)
             if errors and not devices:
                 self._json(400, {"errors": errors})
                 return
@@ -451,9 +495,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/apply":
-            csv_text = body.get("csv")
-            if csv_text:
-                devices, errors = parse_csv_text(str(csv_text))
+            if body.get("csv") or body.get("xlsx_base64"):
+                devices, errors, _csv_text = _parse_body(body)
                 if errors and not devices:
                     self._json(400, {"errors": errors})
                     return
@@ -461,7 +504,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 devices = load_queue()
             if not devices:
-                self._json(400, {"error": "no devices in queue — parse/save CSV first"})
+                self._json(400, {"error": "no devices in queue — parse/save CSV or Excel first"})
                 return
             if not HA_TOKEN:
                 self._json(
@@ -487,7 +530,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"tuya-import http://0.0.0.0:{PORT}/ csv+manual (queue={QUEUE_PATH})", flush=True)
+    print(
+        f"tuya-import http://0.0.0.0:{PORT}/ csv+xlsx+manual (queue={QUEUE_PATH})",
+        flush=True,
+    )
     server.serve_forever()
 
 

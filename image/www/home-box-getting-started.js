@@ -14,7 +14,7 @@ class HomeBoxGettingStarted extends HTMLElement {
       </style>
       <div class="brand"><img src="/local/home-box-logo.svg" alt="Home Box" /></div>
       <h1>Getting started</h1>
-      <p class="ok">This is <strong>Home Box</strong>. The engine underneath is Home Assistant Core (open source). You do not need Tuya cloud, Nabu Casa, or Smart Life for day-to-day use.</p>
+      <p class="ok">This is <strong>Home Box</strong>. Day-to-day use stays local — no Tuya cloud, Nabu Casa, or Smart Life. (Open-source Home Assistant Core powers the engine; see NOTICE.)</p>
 
       <h2>1. Takeover checklist</h2>
       <ol>

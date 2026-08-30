@@ -29,9 +29,10 @@ Owner setup + password-reset hook contract (for BMS implementers): [`BMS_OWNER_A
 - [x] Home Box theme (`image/themes/home_box.yaml`) + default on start
 - [x] Logo (`/local/home-box-logo.svg`)
 - [x] Getting started + Company access panels (product copy)
-- [x] Enroll / import UIs titled Home Box
+- [x] Enroll / import UIs titled Home Box (import: “Apply on Home Box”, not HA)
 - [x] Overview / sidebar / tab title → **Home Box** (frontend asset patch at image build + `/local/home-box-brand.js`)
-- [ ] Operator UI wording on BMS (other repo)
+- [x] Agent version string `home-box-0.1` (not `ha-lab`)
+- [ ] Operator UI wording on BMS (other team / other repo)
 
 ### Phase 2 — Identifier sweep (partial)
 - [x] Image `home-box:local`
@@ -42,6 +43,9 @@ Owner setup + password-reset hook contract (for BMS implementers): [`BMS_OWNER_A
 ### Phase 3–4
 - Deferred (custom shell / Companion) — optional later
 
-## Still WireGuard-dependent (out of this pass)
+## Still WireGuard-dependent (partial)
 
-- Box VPN client, production relay, phone-away path, full edge HTTPS-over-VPN story
+- Home Box **accepts** box peer keys from the enroll QR and writes `config/wireguard/wg0.conf` — [WIREGUARD_QR.md](./WIREGUARD_QR.md)
+- BMS must embed the box peer in the QR (other team)
+- Production hub / phone peers / HTTPS-over-VPN relay still deferred
+- Linux/Pi: `docker compose --profile wireguard up -d`; Windows: import conf into WireGuard app

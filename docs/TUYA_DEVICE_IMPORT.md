@@ -1,4 +1,4 @@
-# Tuya devices on Home Box — CSV or manual
+# Tuya devices on Home Box — CSV, Excel, or manual
 
 Home Box uses **Tuya Local only**. It never uses Tuya / Smart Life cloud.
 
@@ -8,10 +8,12 @@ Your **sandbox** (elsewhere) produces device credentials. Home Box only **import
 
 | Method | When |
 | --- | --- |
-| **CSV / Excel** | Many devices at once. Excel → **Save As → CSV UTF-8**, then import on Home Box |
-| **Manual** | One device in Home Box UI: Settings → Devices → Add integration → **Tuya Local** → **manual** |
+| **CSV / Excel (.xlsx)** | Many devices at once. Upload on Home Box `:8098` |
+| **Manual** | One device: Settings → Devices → Add integration → **Tuya Local** → **manual** |
 
-## CSV columns
+Legacy `.xls` is not supported — use `.xlsx` or CSV UTF-8.
+
+## Columns
 
 | Column | Required | Notes |
 | --- | --- | --- |
@@ -23,19 +25,20 @@ Your **sandbox** (elsewhere) produces device credentials. Home Box only **import
 | `type` | no* | Tuya Local profile id (e.g. `wifi_heatpump`). Needed for auto-apply |
 | `poll_only` | no | `true` / `false` (default `false`) |
 
-\*Without `type`, use the CSV as a checklist and finish each device manually in Tuya Local (it will offer matching profiles).
+\*Without `type`, use the file as a checklist and finish each device manually in Tuya Local (it will offer matching profiles).
 
-Template: [templates/tuya_devices.csv](templates/tuya_devices.csv)
+Excel: put these headers on the **first sheet**, row 1.  
+CSV template: [templates/tuya_devices.csv](templates/tuya_devices.csv)
 
-## Import UI (bulk)
+## Bulk import UI
 
 1. Place devices on the house LAN (same network Home Box can reach).
 2. Open **http://127.0.0.1:8098/** on the box.
-3. Upload the CSV (or paste CSV text).
-4. Review the list.
+3. Upload **CSV** or **Excel (.xlsx)**, or paste CSV text.
+4. Review the list (Excel is converted to CSV in the text box).
 5. **Save inventory** — stores a queue on the box (`/config/tuya_import_queue.json`, not committed).
 6. Either:
-   - **Apply via Home Assistant** (needs a long-lived HA token in `BMS_HA_TOKEN`, devices online, and `type` set), or  
+   - **Apply on Home Box** (needs a long-lived access token in `BMS_HA_TOKEN`, devices online, and `type` set), or  
    - **Manual** — for each row, Add **Tuya Local** → manual, copy fields from the import page.
 
 ## Manual one-by-one
@@ -51,4 +54,4 @@ Template: [templates/tuya_devices.csv](templates/tuya_devices.csv)
 - Do **not** add Core integration **Tuya** (cloud).
 - Do **not** put sandbox cloud API keys on Home Box.
 - After import, devices talk **LAN only** to Home Box.
-- Keep CSV files with keys offline / encrypted; treat like passwords.
+- Keep CSV / Excel files with keys offline / encrypted; treat like passwords.

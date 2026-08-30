@@ -1,7 +1,8 @@
-"""Parse and validate Home Box Tuya Local device CSV rows."""
+"""Parse and validate Home Box Tuya Local device CSV / Excel rows."""
 
 from __future__ import annotations
 
+import base64
 import csv
 import io
 import re
@@ -14,6 +15,7 @@ OPTIONAL_DEFAULTS = {
     "type": "",
     "poll_only": "false",
 }
+CSV_FIELDS = list(REQUIRED) + list(OPTIONAL_DEFAULTS.keys())
 
 HEADER_ALIASES = {
     "name": "name",
@@ -89,6 +91,66 @@ def parse_csv_text(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     if not devices and not errors:
         errors.append("No data rows found")
     return devices, errors
+
+
+def devices_to_csv(devices: list[dict[str, Any]]) -> str:
+    """Serialize devices back to CSV text (for Excel → textarea round-trip)."""
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=CSV_FIELDS, extrasaction="ignore")
+    writer.writeheader()
+    for d in devices:
+        row = {key: d.get(key, "") for key in CSV_FIELDS}
+        row["poll_only"] = "true" if d.get("poll_only") else "false"
+        writer.writerow(row)
+    return buf.getvalue()
+
+
+def parse_xlsx_bytes(data: bytes) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parse first sheet of an .xlsx workbook into device rows."""
+    try:
+        from openpyxl import load_workbook
+    except ImportError:
+        return [], [
+            "Excel support not installed — rebuild home-box-tuya-import image"
+        ]
+
+    if not data:
+        return [], ["Excel file is empty"]
+
+    try:
+        wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except Exception as err:  # noqa: BLE001
+        return [], [f"Cannot read Excel file: {err}"]
+
+    try:
+        ws = wb.active
+        if ws is None:
+            return [], ["Excel workbook has no active sheet"]
+
+        out = io.StringIO()
+        writer = csv.writer(out)
+        row_count = 0
+        for row in ws.iter_rows(values_only=True):
+            if row is None or all(c is None or str(c).strip() == "" for c in row):
+                continue
+            writer.writerow(["" if c is None else str(c).strip() for c in row])
+            row_count += 1
+        if row_count == 0:
+            return [], ["Excel sheet is empty"]
+        return parse_csv_text(out.getvalue())
+    finally:
+        wb.close()
+
+
+def parse_xlsx_base64(b64: str) -> tuple[list[dict[str, Any]], list[str]]:
+    raw = (b64 or "").strip()
+    if not raw:
+        return [], ["Excel payload is empty"]
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except Exception as err:  # noqa: BLE001
+        return [], [f"Invalid Excel base64: {err}"]
+    return parse_xlsx_bytes(data)
 
 
 def public_device(d: dict[str, Any]) -> dict[str, Any]:

@@ -17,6 +17,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from bms_fetch import bms_request
 from bms_runtime import save_runtime_from_snapshot
 from bms_share import limited_share_enabled, load_share
 from enroll_store import resolve_credentials
@@ -24,28 +25,30 @@ from enroll_store import resolve_credentials
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
 HA_TOKEN = os.environ.get("BMS_HA_TOKEN", "").strip()
 INTERVAL = int(os.environ.get("BMS_INTERVAL", "20"))
-VERSION = os.environ.get("BMS_AGENT_VERSION", "ha-lab-0.1")
+VERSION = os.environ.get("BMS_AGENT_VERSION", "home-box-0.1")
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
 CLIMATE_ENTITY = os.environ.get("BMS_CLIMATE_ENTITY", "climate.heat_pump")
 
 
+def ha_service_row() -> dict:
+    """Probe Home Assistant for heartbeat service list."""
+    try:
+        req = urllib.request.Request(
+            f"{HA_URL}/",
+            method="GET",
+            headers={"Accept": "text/html,application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            code = getattr(resp, "status", 200) or 200
+        if 200 <= int(code) < 500:
+            return {"id": "homeassistant", "status": "ok", "detail": f"http {code}"}
+        return {"id": "homeassistant", "status": "degraded", "detail": f"http {code}"}
+    except Exception as err:
+        return {"id": "homeassistant", "status": "down", "detail": str(err)[:160]}
+
+
 def api(method: str, path: str, body: dict | None = None) -> dict:
-    platform, token, _uid = resolve_credentials()
-    if not token:
-        raise RuntimeError("no enroll token (save QR on enroll UI or set BMS_ENROLL_TOKEN)")
-    data = None if body is None else json.dumps(body).encode()
-    req = urllib.request.Request(
-        f"{platform}{path}",
-        data=data,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode())
+    return bms_request(method, path, body, timeout=15)
 
 
 def ha_get(path: str):
@@ -197,12 +200,17 @@ def loop():
             share_on = bool(share.get("limited_share_enabled"))
             snap = api("GET", "/api/v1/ingest/subscription/")
             fail = bool(snap.get("fail_closed"))
-            ha_ok = bool(ha_get("/api/") or (CONFIG / ".storage" / "core.config").is_file())
+            ha_row = ha_service_row()
             hb_body = {
                 "version": VERSION,
                 "services": [
-                    {"id": "homeassistant", "status": "ok" if ha_ok else "down"},
+                    {
+                        "id": "home-box",
+                        "status": "ok" if ha_row.get("status") == "ok" else ha_row.get("status") or "degraded",
+                        "detail": "appliance",
+                    },
                     {"id": "platform-agent", "status": "ok"},
+                    ha_row,
                 ],
                 "limited_share_enabled": share_on,
                 "limited_share_scope": share.get("scope") or ["status", "support_activity"],

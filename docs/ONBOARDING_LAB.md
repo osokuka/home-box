@@ -9,6 +9,7 @@ QR JSON shape (from operator `prepare-box` / enrollment QR):
 {"v":1,"unique_id":"<uuid>","enroll_token":"bms_…","ha_hostname":"<slug>.ha.localhost"}
 ```
 
+Optional WireGuard box peer in the **same** QR (`v:2`) — see [WIREGUARD_QR.md](WIREGUARD_QR.md).
 ## Flow
 
 ```text

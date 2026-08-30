@@ -1,0 +1,5 @@
+FROM python:3.12-alpine
+# docker CLI so enroll can recreate the WireGuard client after QR save (Linux/Pi / Desktop sock).
+RUN apk add --no-cache docker-cli docker-cli-compose
+WORKDIR /app
+CMD ["python", "-u", "/app/enroll_ui.py"]
