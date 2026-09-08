@@ -11,7 +11,7 @@
 └──────────────┬──────────────┘         └──────────────────────────────┘
                │ local protocols only
                ▼
-        IoT VLAN (no WAN) — Tuya local, Zigbee, Matter, …
+        IoT VLAN (no WAN) — Tuya local, HLK-DIO16 Ethernet I/O, Zigbee, Matter, …
 ```
 
 - **House owner** controls devices and creates any HA logins for technicians.

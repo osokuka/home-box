@@ -1,0 +1,114 @@
+# HLK-DIO16 — local Ethernet I/O on Home Box
+
+Integrate the Hi-Link **HLK-DIO16** (16 digital inputs + 16 relay outputs) over the house LAN using its proprietary binary TCP protocol. No MQTT, no vendor cloud, no RS485 required for this path.
+
+## Lab device (verified)
+
+| Field | Value |
+| --- | --- |
+| IP | `192.168.0.49` |
+| TCP port | `8080` |
+| MAC | `40:d6:3c:34:31:14` |
+| Protocol header | `6A A6` |
+| Home Box integration | `hlk_dio16` |
+
+Identification: LAN scan for TCP `8080`, then protocol probe (read DI/DO + toggle DO1). Confirmed by unplug/`ping -t` drop-and-recover on this IP.
+
+## Architecture
+
+```text
+Home Assistant (Home Box)
+      │
+      │ custom_components/hlk_dio16
+      ▼
+HLK-DIO16 driver (asyncio TCP)
+      │
+      │ TCP :8080   (header 6A A6)
+      ▼
+HLK-DIO16
+  ├── DI01 … DI16  → binary_sensor
+  └── DO01 … DO16  → switch
+```
+
+On **Docker Desktop (Windows lab)**, HA cannot route to `192.168.0.x` directly. Traffic is redirected by `lan-router` through the Windows SOCKS5 helper (`tuya/socks5-windows.ps1` on port `1080`). Sold Pi/PC images set `ENABLE_LAN_SOCKS=0`.
+
+## Prerequisites (Windows lab)
+
+1. Device powered and on the house Ethernet LAN (same L2/L3 as the box host).
+2. Start SOCKS (after each Windows reboot):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tuya\socks5-windows.ps1
+```
+
+3. Ensure `lan-router` is up:
+
+```bash
+docker compose up -d lan-router
+```
+
+4. Smoke-test from inside HA:
+
+```bash
+docker compose exec homeassistant \
+  python /config/custom_components/hlk_dio16/smoke.py --host 192.168.0.49
+```
+
+Expect: read inputs/outputs, toggle DO01, restore previous state, print `OK`.
+
+## Add in Home Assistant UI
+
+1. Open Home Box → **Settings → Devices & Services → Add Integration**.
+2. Search **HLK-DIO16**.
+3. Enter:
+   - **IP address:** `192.168.0.49` (or the unit’s current DHCP/static IP)
+   - **TCP port:** `8080`
+4. Submit. Home Box creates one device with:
+   - 16× `binary_sensor` — `DI01` … `DI16`
+   - 16× `switch` — `DO01` … `DO16`
+
+Example entity IDs on this lab box:
+
+- `binary_sensor.hlk_dio16_192_168_0_49_di01`
+- `switch.hlk_dio16_192_168_0_49_do01`
+
+## Commands used (v1)
+
+| Cmd | Role |
+| --- | --- |
+| `0x07` | Read 16 inputs (2 packed bytes) |
+| `0x06` | Read 16 outputs (2 packed bytes) |
+| `0x01` | Output control (channel mask + on/off) |
+
+Polling defaults to ~500 ms for both DI and DO. Connection is persistent TCP with reconnect on failure; entities go unavailable while disconnected.
+
+## Source layout
+
+```text
+image/custom_components/hlk_dio16/
+  protocol.py     # frame encode/decode + checksum
+  client.py       # TCP connect / read / set_output
+  coordinator.py  # HA polling
+  config_flow.py  # IP + port setup
+  switch.py       # DO01–DO16
+  binary_sensor.py# DI01–DI16
+  smoke.py        # hardware smoke test
+```
+
+Protocol framing was cross-checked against the MIT-licensed [jameshilliard/hlk-dio16](https://github.com/jameshilliard/hlk-dio16) implementation and validated on this physical unit.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Config flow / smoke: timeout from container | SOCKS script running? `lan-router` up? `ENABLE_LAN_SOCKS=1`? |
+| Host ping works, HA does not | Docker Desktop LAN path — SOCKS required on Windows lab |
+| Smoke test fails while integration is loaded | Device allows **one TCP client**; unload/disable the integration first, or trust HA’s connection |
+| Wrong device after DHCP change | Re-scan TCP `8080`, update the integration host, or re-add |
+| Relays click in smoke but entities unavailable | Reload the integration or restart `homeassistant` |
+
+## Later (not in v1)
+
+- Device-local auto/linkage rules (`0x0F`, `0x10`–`0x1F`) for fail-soft BMS logic
+- Configurable poll intervals
+- Shared “BMS I/O” abstraction for other Ethernet controllers

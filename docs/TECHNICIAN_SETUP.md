@@ -14,7 +14,8 @@ You set up **devices on the house box**. You do not assign HVAC companies. You d
 1. Owner (or you under the bootstrap login, then hand over) opens Home Box.
 2. **Bulk:** CSV or Excel (.xlsx) → http://127.0.0.1:8098/ (see [TUYA_DEVICE_IMPORT.md](TUYA_DEVICE_IMPORT.md)).
 3. **Or one-by-one:** Add **Tuya Local** (not Core “Tuya”) → **manual** IP + device id + local key.
-4. Heat pump: use **Heat**, not Cool.
+4. **Digital I/O:** Add **HLK-DIO16** → IP + port `8080` (lab unit `192.168.0.49`). See [HLK_DIO16.md](HLK_DIO16.md).
+5. Heat pump: use **Heat**, not Cool.
 
 Do **not** install or sign in to the official Home Assistant **Tuya** integration (cloud). Home Box only supports **Tuya Local**. Sandbox cloud registration is outside this box.
 

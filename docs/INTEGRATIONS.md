@@ -22,9 +22,13 @@ Lab LAN path for Docker Desktop: `ENABLE_LAN_SOCKS=1` + `tuya/socks5-windows.ps1
 - Protocol: proprietary binary TCP on port **8080** (header `6A A6`). No MQTT, no vendor cloud, no RS485 required.
 - Add via **Settings → Devices & Services → Add Integration → HLK-DIO16** (IP + port).
 - Creates 16 `binary_sensor` inputs (DI01–DI16) and 16 `switch` outputs (DO01–DO16).
-- Smoke test against hardware (from repo root):
+- Full procedure, lab IP, and SOCKS notes: [HLK_DIO16.md](HLK_DIO16.md).
+
+Lab unit (verified): **`192.168.0.49:8080`**.
+
+Smoke test against hardware (from repo root):
 
 ```bash
 docker compose exec homeassistant \
-  python /config/custom_components/hlk_dio16/smoke.py --host 192.168.x.x
+  python /config/custom_components/hlk_dio16/smoke.py --host 192.168.0.49
 ```

@@ -89,59 +89,121 @@ class HlkDio16Client:
 
     async def read_inputs(self) -> dict[int, bool]:
         """Return digital input states keyed by channel 1–16."""
-        payload = await self._transact(encode_read(Command.INPUT_STATE))
-        return self._parse_state_payload(payload, Command.INPUT_STATE)
+        return await self._read_states(Command.INPUT_STATE)
 
     async def read_outputs(self) -> dict[int, bool]:
         """Return digital output states keyed by channel 1–16."""
-        payload = await self._transact(encode_read(Command.OUTPUT_STATE))
-        return self._parse_state_payload(payload, Command.OUTPUT_STATE)
+        return await self._read_states(Command.OUTPUT_STATE)
 
     async def set_output(self, channel: int, state: bool) -> dict[int, bool]:
         """Set one output channel and return refreshed output states."""
-        await self._transact(encode_output_control(channel, state), expect_control_ack=True)
-        return await self.read_outputs()
+        async with self._lock:
+            await self._ensure_connected()
+            assert self._writer is not None
+            try:
+                self._writer.write(encode_output_control(channel, state))
+                await self._writer.drain()
+
+                # Firmware may reply with 0xFF ack, OUTPUT_STATE, or both.
+                deadline = asyncio.get_running_loop().time() + self.timeout
+                while True:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    frame = await asyncio.wait_for(
+                        self._read_one_frame(), timeout=remaining
+                    )
+                    if frame[0] == int(Command.OUTPUT_STATE):
+                        return decode_channel_bits(frame[1:])
+                    if frame[0] == int(Command.TYPE_RESPONSE):
+                        self._validate_control_ack(frame)
+                        # Often a state frame follows immediately in the same burst.
+                        try:
+                            follow = await asyncio.wait_for(
+                                self._read_one_frame(), timeout=0.4
+                            )
+                        except asyncio.TimeoutError:
+                            break
+                        if follow[0] == int(Command.OUTPUT_STATE):
+                            return decode_channel_bits(follow[1:])
+                        # Unexpected follow-up; keep waiting until deadline.
+                        continue
+                    _LOGGER.debug(
+                        "Skipping unexpected frame after output control: %r", frame[:1]
+                    )
+
+                self._writer.write(encode_read(Command.OUTPUT_STATE))
+                await self._writer.drain()
+                frame = await asyncio.wait_for(
+                    self._read_frame_matching({Command.OUTPUT_STATE}),
+                    timeout=self.timeout,
+                )
+                return decode_channel_bits(frame[1:])
+            except asyncio.TimeoutError as err:
+                await self.disconnect()
+                raise HlkDio16TimeoutError(
+                    "timed out waiting for HLK-DIO16 response"
+                ) from err
+            except (OSError, HlkDio16ProtocolError, ValueError) as err:
+                await self.disconnect()
+                if isinstance(err, (HlkDio16ProtocolError, ValueError)):
+                    raise HlkDio16ProtocolError(str(err)) from err
+                raise HlkDio16ConnectionError(str(err)) from err
 
     async def health_check(self) -> dict[int, bool]:
         """Cheap connectivity check: read outputs."""
         return await self.read_outputs()
 
-    async def _ensure_connected(self) -> None:
-        if not self.connected:
-            await self.connect()
-
-    async def _transact(
-        self,
-        packet: bytes,
-        *,
-        expect_control_ack: bool = False,
-    ) -> bytes:
+    async def _read_states(self, command: Command) -> dict[int, bool]:
         async with self._lock:
             await self._ensure_connected()
             assert self._writer is not None
             try:
-                self._writer.write(packet)
+                self._writer.write(encode_read(command))
                 await self._writer.drain()
-                return await asyncio.wait_for(
-                    self._read_one_frame(expect_control_ack=expect_control_ack),
+                frame = await asyncio.wait_for(
+                    self._read_frame_matching({command}),
                     timeout=self.timeout,
                 )
+                return decode_channel_bits(frame[1:])
             except asyncio.TimeoutError as err:
                 await self.disconnect()
-                raise HlkDio16TimeoutError("timed out waiting for HLK-DIO16 response") from err
-            except (OSError, HlkDio16ProtocolError) as err:
+                raise HlkDio16TimeoutError(
+                    "timed out waiting for HLK-DIO16 response"
+                ) from err
+            except (OSError, HlkDio16ProtocolError, ValueError) as err:
                 await self.disconnect()
-                if isinstance(err, HlkDio16ProtocolError):
-                    raise
+                if isinstance(err, (HlkDio16ProtocolError, ValueError)):
+                    raise HlkDio16ProtocolError(str(err)) from err
                 raise HlkDio16ConnectionError(str(err)) from err
 
-    async def _read_one_frame(self, *, expect_control_ack: bool) -> bytes:
+    async def _ensure_connected(self) -> None:
+        if not self.connected:
+            await self.connect()
+
+    async def _read_frame_matching(self, accepted: set[Command]) -> bytes:
+        """Read frames until one matches an accepted command (skip stale leftovers)."""
+        accepted_ids = {int(cmd) for cmd in accepted}
+        skips = 0
+        while True:
+            frame = await self._read_one_frame()
+            if frame and frame[0] in accepted_ids:
+                return frame
+            skips += 1
+            _LOGGER.debug("Skipping unexpected HLK frame while waiting: %r", frame[:1])
+            if skips > 8:
+                raise HlkDio16ProtocolError(
+                    f"too many unexpected frames; wanted {[hex(i) for i in accepted_ids]}"
+                )
+
+    async def _read_one_frame(self) -> bytes:
         assert self._reader is not None
         while True:
-            frame = extract_frame(self._buffer)
+            try:
+                frame = extract_frame(self._buffer)
+            except ValueError as err:
+                raise HlkDio16ProtocolError(str(err)) from err
             if frame is not None:
-                if expect_control_ack:
-                    self._validate_control_ack(frame)
                 return frame
             chunk = await self._reader.read(256)
             if not chunk:
@@ -157,19 +219,10 @@ class HlkDio16Client:
         if len(frame) < 4 or frame[1] != int(Command.OUTPUT_CTR):
             raise HlkDio16ProtocolError(f"unexpected control ack payload: {frame!r}")
 
-    @staticmethod
-    def _parse_state_payload(frame: bytes, expected: Command) -> dict[int, bool]:
-        if not frame or frame[0] != int(expected):
-            raise HlkDio16ProtocolError(
-                f"expected command 0x{int(expected):02x}, got {frame[:1]!r}"
-            )
-        try:
-            return decode_channel_bits(frame[1:])
-        except ValueError as err:
-            raise HlkDio16ProtocolError(str(err)) from err
 
-
-async def probe_device(host: str, port: int = DEFAULT_PORT, timeout: float = 5.0) -> dict[str, Any]:
+async def probe_device(
+    host: str, port: int = DEFAULT_PORT, timeout: float = 5.0
+) -> dict[str, Any]:
     """Connect, read DI/DO once, disconnect — used by config flow and smoke tests."""
     client = HlkDio16Client(host, port, timeout=timeout)
     try:

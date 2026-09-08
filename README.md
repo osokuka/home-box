@@ -22,7 +22,8 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, network, privacy model |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | How the box talks to BMS (ingest contract) |
 | [docs/ONBOARDING_LAB.md](docs/ONBOARDING_LAB.md) | Lab enroll UI (:8099) + camera QR + unique ID |
-| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Tuya Local only (not Core cloud Tuya) |
+| [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Tuya Local + HLK-DIO16 (local only) |
+| [docs/HLK_DIO16.md](docs/HLK_DIO16.md) | HLK-DIO16 Ethernet I/O setup + lab IP |
 | [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md) | CSV / Excel import or manual device add |
 | [docs/TECHNICIAN_SETUP.md](docs/TECHNICIAN_SETUP.md) | On-site device pairing procedure |
 | [docs/OPENCLAW_MCP.md](docs/OPENCLAW_MCP.md) | Read-only MCP for OpenClaw / AI agents |
@@ -42,5 +43,6 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 - Lab stack: HA Core + agent + enroll (:8099) + Tuya import (:8098) + MCP (:8100) + privacy LAN router
 - Product name: **Home Box** — see `NOTICE` and [docs/REBRAND.md](docs/REBRAND.md)
 - Tuya: **Local only** via CSV/manual — [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md)
+- Digital I/O: **HLK-DIO16** over LAN TCP — [docs/HLK_DIO16.md](docs/HLK_DIO16.md)
 - AI agents: read-only MCP for OpenClaw — [docs/OPENCLAW_MCP.md](docs/OPENCLAW_MCP.md) (BYO LLM stays in the agent)
 - WireGuard / production relay: **not in this pass**
