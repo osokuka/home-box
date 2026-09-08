@@ -110,8 +110,8 @@ Home Box treats connectivity success with no gate field as **`ok`** (older BMS).
 
 | Host | How |
 | --- | --- |
-| **Linux / Raspberry Pi** | Enroll UI restarts the profile when Docker sock is available; otherwise `docker compose --profile wireguard up -d` |
-| **Windows lab** | Import `config/wireguard/wg0.conf` into **WireGuard for Windows** during/before the countdown (Docker Desktop WG profile is unreliable) |
+| **Linux / Raspberry Pi** | WireGuard is in the default stack (`docker compose up -d`). Enroll UI restarts the container when Docker sock is available; otherwise `docker compose up -d --force-recreate wireguard wg-ha-proxy` |
+| **Windows lab** | Same default stack. If the Docker WG container is unreliable, also import `config/wireguard/wg0.conf` into **WireGuard for Windows** during/before the countdown |
 
 `AllowedIPs` must stay overlay-only (`10.10.0.0/16`) — never `0.0.0.0/0`.
 

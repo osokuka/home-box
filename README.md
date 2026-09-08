@@ -36,13 +36,13 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 - Direct: `http://127.0.0.1:8123` or LAN `http://192.168.0.10:8123`
 - Via BMS nginx: `http://windows-lab.ha.localhost:8080` (hosts entry required)
 - Enroll UI: `http://127.0.0.1:8099/`
-- WireGuard and production `{slug}.…` hostnames come later
+- WireGuard / edge: `{slug}.scardustech.com` (e.g. lab `box-aq`) — see [docs/WIREGUARD_QR.md](docs/WIREGUARD_QR.md)
 
 ## Status
 
-- Lab stack: HA Core + agent + enroll (:8099) + Tuya import (:8098) + MCP (:8100) + privacy LAN router
+- Default stack: HA Core + WireGuard + WG HA proxy + agent + enroll (:8099) + Tuya import (:8098) + MCP (:8100) + privacy LAN router
 - Product name: **Home Box** — see `NOTICE` and [docs/REBRAND.md](docs/REBRAND.md)
 - Tuya: **Local only** via CSV/manual — [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md)
 - Digital I/O: **HLK-DIO16** over LAN TCP — [docs/HLK_DIO16.md](docs/HLK_DIO16.md)
 - AI agents: read-only MCP for OpenClaw — [docs/OPENCLAW_MCP.md](docs/OPENCLAW_MCP.md) (BYO LLM stays in the agent)
-- WireGuard / production relay: **not in this pass**
+- WireGuard: included in default `docker compose up -d` — [docs/WIREGUARD_QR.md](docs/WIREGUARD_QR.md)

@@ -204,7 +204,7 @@ def apply_wireguard() -> dict[str, Any]:
         result["mode"] = "conf_ready_no_docker_sock"
         result["hint"] = (
             "WireGuard conf saved. On Linux/Pi run: "
-            "docker compose --profile wireguard up -d --force-recreate wireguard. "
+            "docker compose up -d --force-recreate wireguard. "
             "On Windows lab import config/wireguard/wg0.conf into WireGuard for Windows."
         )
         return result
@@ -313,7 +313,7 @@ def apply_wireguard() -> dict[str, Any]:
             result["mode"] = "conf_ready_restart_failed"
             result["hint"] = (
                 "Conf saved but docker restart failed. "
-                "On the host: docker compose --profile wireguard up -d --force-recreate wireguard"
+                "On the host: docker compose up -d --force-recreate wireguard"
             )
             return result
 
@@ -336,7 +336,7 @@ def apply_wireguard() -> dict[str, Any]:
         result["hint"] = (
             "Conf saved but could not create WireGuard container. "
             f"{(created.stderr or '').strip() or 'unknown error'} "
-            "On the host: docker compose --profile wireguard up -d."
+            "On the host: docker compose up -d wireguard wg-ha-proxy."
         )
         return result
     except FileNotFoundError:
