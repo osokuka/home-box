@@ -11,7 +11,7 @@
 └──────────────┬──────────────┘         └──────────────────────────────┘
                │ local protocols only
                ▼
-        IoT VLAN (no WAN) — Tuya local, Zigbee, Matter, …
+        IoT VLAN (no WAN) — Tuya local, HLK-DIO16 Ethernet I/O, Zigbee, Matter, …
 ```
 
 - **House owner** controls devices and creates any HA logins for technicians.
@@ -57,8 +57,8 @@ ha/
 
 | Phase | How clients open HA |
 | --- | --- |
-| **Now** | Host TCP 8123; BMS nginx proxies `{slug}.ha.localhost:8080` with WebSocket upgrade |
-| **Later** | `{slug}.ha.{domain}` over WireGuard — not built in this box repo yet |
+| **Now** | Host TCP 8123; BMS nginx proxies `{slug}.ha.localhost:8080`; WireGuard edge `{slug}.scardustech.com` via default stack |
+| **Later** | Hardened production TLS / relay policies as needed |
 
 Trusted proxies in HA HTTP config cover Docker/BMS nginx ranges only (not `0.0.0.0/0`).
 

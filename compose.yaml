@@ -101,10 +101,10 @@ services:
     networks:
       - ha
 
-  # Optional WireGuard client (Linux / Pi host with kernel WG). Not for Windows Docker Desktop.
+  # WireGuard client — part of the default stack (Linux / Pi with kernel WG).
   # Conf is written from enroll QR to config/wireguard/wg0.conf
+  # Windows Docker Desktop: tunnel may be unreliable; import wg0.conf into WireGuard for Windows if needed.
   wireguard:
-    profiles: ["wireguard"]
     image: lscr.io/linuxserver/wireguard:1.0.20210914-r4-ls50
     container_name: home-box-wireguard
     restart: unless-stopped
@@ -128,7 +128,6 @@ services:
   # Publish Home Box UI on the WireGuard address (10.10.x.y:8123) for CF/NPM edge.
   # Shares the WG container netns; forwards to homeassistant on the compose network.
   wg-ha-proxy:
-    profiles: ["wireguard"]
     image: alpine/socat:1.8.0.0
     container_name: home-box-wg-ha-proxy
     restart: unless-stopped

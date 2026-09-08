@@ -6,6 +6,7 @@ logger:
   default: warning
   logs:
     custom_components.tuya_local: warning
+    custom_components.hlk_dio16: warning
     homeassistant.components.tuya: error
     homeassistant.components.cloud: error
     homeassistant.components.analytics: error

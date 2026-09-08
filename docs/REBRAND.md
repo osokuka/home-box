@@ -48,4 +48,4 @@ Owner setup + password-reset hook contract (for BMS implementers): [`BMS_OWNER_A
 - Home Box **accepts** box peer keys from the enroll QR and writes `config/wireguard/wg0.conf` — [WIREGUARD_QR.md](./WIREGUARD_QR.md)
 - BMS must embed the box peer in the QR (other team)
 - Production hub / phone peers / HTTPS-over-VPN relay still deferred
-- Linux/Pi: `docker compose --profile wireguard up -d`; Windows: import conf into WireGuard app
+- Linux/Pi: WireGuard is in the default `docker compose up -d` stack; Windows: import conf into WireGuard app if Docker Desktop WG is flaky
