@@ -7,7 +7,7 @@ COPY requirements.txt /tmp/home-box-requirements.txt
 RUN uv pip install --system --no-cache -r /tmp/home-box-requirements.txt \
   && rm -f /tmp/home-box-requirements.txt
 
-# Canonical custom components (Tuya Local only — never Core cloud "tuya").
+# Canonical custom components (Tuya Local, HLK-DIO16, … — never Core cloud "tuya").
 COPY custom_components /usr/share/home-box/custom_components
 COPY brand_frontend_assets.py /usr/share/home-box/brand_frontend_assets.py
 COPY rootfs/ /

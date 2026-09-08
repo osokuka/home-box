@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HLK-DIO16",
+        "description": "Connect to the HLK-DIO16 over the local Ethernet LAN (TCP).",
+        "data": {
+          "host": "IP address",
+          "port": "TCP port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect or validate the HLK-DIO16 protocol response.",
+      "unknown": "Unexpected error while connecting."
+    },
+    "abort": {
+      "already_configured": "This HLK-DIO16 is already configured."
+    }
+  }
+}
