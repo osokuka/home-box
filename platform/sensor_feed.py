@@ -18,7 +18,11 @@ def slug_key(name: str, fallback: str) -> str:
 
 
 def classify_system(raw: Any) -> str:
-    """Normalize client classification for BMS domains (empty if unset)."""
+    """Normalize client classification (domain or location) — empty if unset.
+
+    Clients choose freely (e.g. ``hvac``, ``security``, ``kitchen``, ``front-door``).
+    Home Box never invents a value; we only slug for stable transport.
+    """
     return slug_key(str(raw or "").strip(), "")
 
 
@@ -114,6 +118,7 @@ def map_binary_sensor(
             "sensor.raw": ha_state,
             "sensor.device_class": device_class,
             "sensor.system": system_slug,
+            "sensor.classification": system_slug,
         },
     }
 
@@ -139,24 +144,26 @@ def collect_devices(
         eid = entry["entity_id"]
         system = entry.get("system") or ""
         st = by_id.get(eid)
+        system_slug = classify_system(system)
         if not st:
             devices.append(
                 {
                     "id": slug_key(eid, eid.replace(".", "-")),
                     "class": "binary_input",
-                    "system": system,
+                    "system": system_slug,
                     "display_name": eid,
                     "health": "unknown",
                     "telemetry": {
                         "sensor.entity_id": eid,
                         "sensor.state": None,
                         "sensor.raw": "missing",
-                        "sensor.system": system,
+                        "sensor.system": system_slug,
+                        "sensor.classification": system_slug,
                     },
                 }
             )
             continue
-        mapped = map_binary_sensor(st, system=system)
+        mapped = map_binary_sensor(st, system=system_slug)
         if mapped:
             devices.append(mapped)
 

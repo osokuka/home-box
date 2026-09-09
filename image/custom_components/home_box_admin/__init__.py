@@ -440,9 +440,10 @@ class LimitedShareView(HomeAssistantView):
                 "available_sensors": _available_binary_sensors(hass),
                 "active_company_grants": grants,
                 "note": (
-                    "Select sensors and classify each one yourself (e.g. hvac, security). "
-                    "Home Box never invents a category. Changing the list pushes an updated "
-                    "catalog to BMS. Companies only see data after you grant them in BMS. "
+                    "Select sensors and label each one yourself (domain or location, "
+                    "e.g. hvac, security, kitchen, front-door). Home Box never invents "
+                    "labels. Changing the list pushes an updated catalog to BMS. "
+                    "Companies only see data after you grant them in BMS. "
                     "Switches/relays are never shared."
                 ),
             }
@@ -459,7 +460,7 @@ class LimitedShareView(HomeAssistantView):
                 {
                     "ok": False,
                     "error": "invalid_input",
-                    "hint": 'JSON {"enabled": true|false, "sensors": [{"entity_id":"binary_sensor.…","system":"hvac"}]}',
+                    "hint": 'JSON {"enabled": true|false, "sensors": [{"entity_id":"binary_sensor.…","system":"hvac|kitchen|…"}]}',
                 },
                 status_code=400,
             )

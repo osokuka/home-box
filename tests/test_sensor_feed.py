@@ -85,6 +85,24 @@ def test_client_classification_not_assumed() -> None:
     assert devices[0]["system"] == ""
 
 
+def test_location_classification_pushed() -> None:
+    states = [
+        {
+            "entity_id": "binary_sensor.door",
+            "state": "off",
+            "attributes": {"friendly_name": "Door"},
+        }
+    ]
+    devices = collect_devices(
+        states,
+        climate_entity="climate.heat_pump",
+        sensors=[{"entity_id": "binary_sensor.door", "system": "Front Door"}],
+        include_climate=False,
+    )
+    assert devices[0]["system"] == "front-door"
+    assert devices[0]["telemetry"]["sensor.classification"] == "front-door"
+
+
 def test_positive_when_hvac_active() -> None:
     states = [
         {
@@ -144,6 +162,7 @@ def main() -> None:
     test_idle_when_sensors_off()
     test_positive_when_sensor_on()
     test_client_classification_not_assumed()
+    test_location_classification_pushed()
     test_positive_when_hvac_active()
     test_share_change_always_posts()
     test_idle_skipped_without_change()

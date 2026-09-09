@@ -116,7 +116,7 @@ def set_limited_share(
         "sensor_entities": [s["entity_id"] for s in entries],
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "note": (
-            "Box consent only. Client classifies each sensor (system/domain). "
+            "Box consent only. Client labels each sensor (domain or location). "
             "No company sees data until the homeowner grants them in BMS."
         ),
     }

@@ -125,12 +125,12 @@ class HomeBoxCompanyAccess extends HTMLElement {
           id +
           "</code></span>" +
           "</label>" +
-          "<label class='classify'>Classify as" +
+          "<label class='classify'>Your label (domain or location)" +
           "<input type='text' data-sys='" +
           id +
           "' value='" +
           classify.replace(/'/g, "&#39;") +
-          "' placeholder='e.g. hvac, security, electricity' " +
+          "' placeholder='e.g. hvac, security, kitchen, front-door' " +
           (checked ? "" : "disabled ") +
           "/>" +
           "</label>" +
@@ -212,7 +212,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       });
       if (msg) {
         msg.textContent = enabled
-          ? "Enabled. Classify each sensor; grant matching domains in BMS."
+          ? "Enabled. Label each sensor (domain or location); grant access in BMS."
           : "Disabled. Sensory feed will stop posting.";
         msg.className = "msg";
       }
@@ -262,10 +262,12 @@ class HomeBoxCompanyAccess extends HTMLElement {
       <h2>Sensory share (this box)</h2>
       <p class="warn" id="shareStatus">Loading…</p>
       <p class="muted">
-        You choose <strong>which</strong> sensors leave and <strong>how they are classified</strong>
-        (domain/category for BMS). Home Box does not invent categories.
-        Changing the list pushes an updated catalog to BMS. You still choose
-        <strong>who</strong> sees them via grants in BMS. Relays/switches are never shared.
+        You choose <strong>which</strong> sensors leave and <strong>how each is labeled</strong>
+        — by domain (<code>hvac</code>, <code>security</code>) or by location
+        (<code>kitchen</code>, <code>front-door</code>). Each client decides their own labels;
+        Home Box never invents them. Changing the list pushes the catalog to BMS.
+        You still choose <strong>who</strong> sees them via grants in BMS.
+        Relays/switches are never shared.
       </p>
       <div class="row">
         <label for="shareToggle">Allow sensory share to BMS</label>
@@ -273,7 +275,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       </div>
 
       <h2>Sensors to include</h2>
-      <p class="muted">Check a sensor, then classify it (e.g. <code>hvac</code>, <code>security</code>, <code>electricity</code>).</p>
+      <p class="muted">Check a sensor, then give it your label (domain or location). Labels are pushed to BMS per sensor.</p>
       <div id="sensorList"><p class="muted">Loading…</p></div>
       <div class="msg" id="shareMsg"></div>
 

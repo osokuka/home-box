@@ -206,19 +206,55 @@ def loop() -> None:
 
             activity = collect_support_activity(state_list) if share_on else []
             # Keep ingest body on the known BMS contract (no extra experimental keys).
-            posted = api(
-                "POST",
-                "/api/v1/ingest/status/",
-                {
-                    "devices": devices,
-                    "support_activity": activity,
-                    "limited_share": share_on,
-                },
-            )
+            # Client classifications are per-sensor (domain or location) in device.system.
+            body = {
+                "devices": devices,
+                "support_activity": activity,
+                "limited_share": share_on,
+            }
+            try:
+                posted = api("POST", "/api/v1/ingest/status/", body)
+            except Exception as batch_err:
+                # One bad classification must not block the rest — push individually.
+                if len(devices) <= 1:
+                    raise batch_err
+                print(
+                    f"feed batch failed ({batch_err}); retrying per device "
+                    f"({len(devices)})",
+                    flush=True,
+                )
+                ok_n = 0
+                for device in devices:
+                    try:
+                        one = api(
+                            "POST",
+                            "/api/v1/ingest/status/",
+                            {
+                                "devices": [device],
+                                "support_activity": activity if ok_n == 0 else [],
+                                "limited_share": share_on,
+                            },
+                        )
+                        ok_n += int(one.get("count") or 1)
+                        print(
+                            f"feed device ok id={device.get('id')} "
+                            f"system={device.get('system')!r}",
+                            flush=True,
+                        )
+                    except Exception as one_err:
+                        print(
+                            f"feed device rejected id={device.get('id')} "
+                            f"system={device.get('system')!r}: {one_err}",
+                            flush=True,
+                        )
+                if ok_n == 0 and devices:
+                    raise batch_err
+                posted = {"count": ok_n, "partial": True}
             print(
                 f"feed push reason={reason} count={posted.get('count')} "
                 f"devices={len(devices)} sensors={len(sensor_entries)} "
-                f"activity={len(activity)}",
+                f"activity={len(activity)}"
+                + (" partial=1" if posted.get("partial") else ""),
                 flush=True,
             )
             last_share_sig = sig

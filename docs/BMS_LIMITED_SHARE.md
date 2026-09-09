@@ -34,16 +34,20 @@ Passwords / device commands are never part of this path.
 
 ### `bms_share.json` shape
 
-`sensors`: `[{ "entity_id": "binary_sensor.…", "system": "<client classification>" }]`  
-`system` is chosen by the homeowner (e.g. `hvac`, `security`) — Home Box never invents it.  
+`sensors`: `[{ "entity_id": "binary_sensor.…", "system": "<client label>" }]`  
+`system` is chosen **per sensor by the client** — domain (`hvac`, `security`, …) **or** location (`kitchen`, `front-door`, …).  
+Home Box never invents or validates against a fixed list; it only slugs for transport.  
 `sensor_entities` remains a derived id list for older readers.
 
 ---
 
 ## Gate 2 — BMS
 
-Same two-gate visibility as before. Domain grants may include `hvac`, `security`, etc.  
-Status ingest may include devices with `system: "security"` (`class: "binary_input"`) and `system: "hvac"` (`class: "heat_pump"`).
+Same two-gate visibility as before.  
+Status ingest includes each device’s client `system` string as-is (plus `telemetry.sensor.classification`).  
+**BMS must accept free-form `system` values** (domain or location), not only a fixed enum — otherwise location labels and custom names return HTTP 400 (`Unknown system`).
+
+Heat-pump rows still use `class: "heat_pump"` with `system: "hvac"` (HA climate domain).
 
 Optional body field: `"feed": "sensory"`.
 
@@ -74,6 +78,6 @@ Company sees allowed sensory devices for granted domains
 ## Acceptance checklist (BMS)
 
 - [ ] Persist `limited_share_enabled` from heartbeat
-- [ ] Accept `binary_input` / `security` devices
+- [ ] Accept `binary_input` devices with **free-form** `system` (domain or location)
 - [ ] Company status requires grant **and** box flag
 - [ ] No passwords / command APIs on this path

@@ -50,13 +50,15 @@ def _direct(method: str, url: str, token: str, body: dict | None, timeout: int) 
 
 def _via_wg(method: str, url: str, token: str, body: dict | None, timeout: int) -> dict[str, Any]:
     """Run curl inside the WireGuard container so traffic uses the tunnel."""
+    # Avoid curl -f so HTTP error bodies (validation) are returned to the caller.
     cmd = [
         "docker",
         "exec",
         WG_CONTAINER,
         "curl",
         "-sS",
-        "-f",
+        "-w",
+        "\n__HTTP_STATUS__:%{http_code}",
         "--max-time",
         str(max(1, int(timeout))),
         "-X",
@@ -84,12 +86,39 @@ def _via_wg(method: str, url: str, token: str, body: dict | None, timeout: int) 
     except subprocess.TimeoutExpired as err:
         raise TimeoutError(f"BMS via WG timed out: {url}") from err
 
-    if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "").strip()[:400]
+    if proc.returncode != 0 and not (proc.stdout or "").strip():
+        err = (proc.stderr or "").strip()[:400]
         raise RuntimeError(
             f"BMS via WG failed (exit {proc.returncode}): {err or 'no output'} [{url}]"
         )
-    raw = (proc.stdout or "").strip()
+
+    raw_out = (proc.stdout or "").rstrip()
+    status = 0
+    body_text = raw_out
+    marker = "\n__HTTP_STATUS__:"
+    if marker in raw_out:
+        body_text, _, status_s = raw_out.rpartition(marker)
+        try:
+            status = int(status_s.strip() or "0")
+        except ValueError:
+            status = 0
+    elif raw_out.startswith("__HTTP_STATUS__:"):
+        _, _, status_s = raw_out.partition(":")
+        body_text = ""
+        try:
+            status = int(status_s.strip() or "0")
+        except ValueError:
+            status = 0
+
+    if status and not (200 <= status < 300):
+        detail = (body_text or proc.stderr or "").strip()[:400]
+        raise RuntimeError(f"BMS HTTP {status}: {detail or 'no body'} [{url}]")
+    if proc.returncode != 0:
+        err = (proc.stderr or body_text or "").strip()[:400]
+        raise RuntimeError(
+            f"BMS via WG failed (exit {proc.returncode}): {err or 'no output'} [{url}]"
+        )
+    raw = body_text.strip()
     return json.loads(raw) if raw else {}
 
 
