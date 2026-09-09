@@ -227,17 +227,6 @@ class HomeBoxCompanyAccess extends HTMLElement {
 
       <h2>Company grants (from BMS)</h2>
       <div id="grantList"><p class="muted">Loading…</p></div>
-
-      <h2>If a technician needs to look inside Home Box</h2>
-      <ol>
-        <li>Settings → People → Add person.</li>
-        <li>Enable login. Do <strong>not</strong> make them Administrator.</li>
-        <li>Give them a password yourself. Do not reuse yours.</li>
-        <li>They open the household URL. Remote VPN comes later.</li>
-      </ol>
-      <p class="muted">
-        Platform sensory share and a Home Box login are separate. Revoking one does not revoke the other.
-      </p>
     `;
     const toggle = this.querySelector("#shareToggle");
     if (toggle) toggle.addEventListener("change", (ev) => this.onToggle(ev));
