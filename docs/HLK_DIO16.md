@@ -85,6 +85,8 @@ HLK outputs are relays → HA **switches** (on/off). For a motor with Up + Down:
 Lab example: package `image/packages/living_room_blind.yaml` → `cover.living_room_blind`  
 (DO03 = Up, DO04 = Down). Swap those entity IDs if direction is reversed.
 
+Idle state is **`unknown`** (not `open`/`closed`) plus `assumed_state`, so after Stop both Open and Close stay available — there are no end-stop sensors on the HLK relays.
+
 ## Commands used (v1)
 
 | Cmd | Role |
