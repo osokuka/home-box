@@ -74,6 +74,17 @@ Example entity IDs on this lab box:
 - `binary_sensor.hlk_dio16_192_168_0_49_di01`
 - `switch.hlk_dio16_192_168_0_49_do01`
 
+### Blinds / shutters (up / down / stop)
+
+HLK outputs are relays → HA **switches** (on/off). For a motor with Up + Down:
+
+1. Wire one DO to Up, one DO to Down (never both on).
+2. Do **not** use Helper → “Change device type of a switch” (that makes one fake cover per relay).
+3. Use one **Template cover** that drives both relays (Open / Close / Stop).
+
+Lab example: package `image/packages/living_room_blind.yaml` → `cover.living_room_blind`  
+(DO03 = Up, DO04 = Down). Swap those entity IDs if direction is reversed.
+
 ## Commands used (v1)
 
 | Cmd | Role |
