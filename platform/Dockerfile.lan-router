@@ -1,0 +1,9 @@
+FROM python:3.12-alpine
+# Build from repo root: docker build -f platform/Dockerfile.lan-router .
+RUN apk add --no-cache iptables ip6tables
+WORKDIR /app
+COPY network/protect-egress.sh /app/protect-egress.sh
+COPY tuya/transparent-socks.py /app/transparent-socks.py
+RUN chmod +x /app/protect-egress.sh
+ENV ENABLE_LAN_SOCKS=0
+CMD ["sh", "-c", "sh /app/protect-egress.sh; if [ \"${ENABLE_LAN_SOCKS:-0}\" = \"1\" ]; then exec python /app/transparent-socks.py; fi; sleep infinity"]

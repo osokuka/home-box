@@ -1,0 +1,47 @@
+#!/bin/sh
+# Seed product HA overlays into /config when not bind-mounted (Hub / named volume).
+set -u
+
+seed_file() {
+  src="$1"
+  dst="$2"
+  if [ ! -f "${src}" ]; then
+    return 0
+  fi
+  if [ -f "${dst}" ]; then
+    return 0
+  fi
+  mkdir -p "$(dirname "${dst}")" 2>/dev/null || true
+  if cp -a "${src}" "${dst}" 2>/dev/null; then
+    echo "home-box: seeded ${dst}"
+  fi
+}
+
+seed_tree() {
+  src="$1"
+  dst="$2"
+  if [ ! -d "${src}" ]; then
+    return 0
+  fi
+  mkdir -p "${dst}" 2>/dev/null || true
+  if ! touch "${dst}/.hb_write_test" 2>/dev/null; then
+    echo "home-box: ${dst} is read-only; skip seed"
+    return 0
+  fi
+  rm -f "${dst}/.hb_write_test"
+  # Copy missing paths only; never clobber live user data wholesale.
+  for item in "${src}"/*; do
+    [ -e "${item}" ] || continue
+    name="$(basename "${item}")"
+    if [ ! -e "${dst}/${name}" ]; then
+      cp -a "${item}" "${dst}/${name}" && echo "home-box: seeded ${dst}/${name}"
+    fi
+  done
+}
+
+seed_file /usr/share/home-box/configuration.yaml /config/configuration.yaml
+seed_file /usr/share/home-box/secrets.example.yaml /config/secrets.yaml
+seed_tree /usr/share/home-box/packages /config/packages
+seed_tree /usr/share/home-box/www /config/www
+seed_tree /usr/share/home-box/themes /config/themes
+exit 0

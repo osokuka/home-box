@@ -2,4 +2,8 @@ FROM python:3.12-alpine
 # docker CLI so enroll can recreate the WireGuard client after QR save (Linux/Pi / Desktop sock).
 RUN apk add --no-cache docker-cli docker-cli-compose
 WORKDIR /app
+COPY enroll_ui.py enroll_store.py wg_store.py bms_fetch.py bms_runtime.py ./
+COPY static ./static
+# Agent + shared modules (same image used by platform-agent).
+COPY agent.py sensor_feed.py ha_local.py ha_token.py bms_share.py ha_readonly.py ha_control.py ./
 CMD ["python", "-u", "/app/enroll_ui.py"]

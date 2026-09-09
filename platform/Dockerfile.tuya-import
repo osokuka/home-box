@@ -1,5 +1,5 @@
 FROM python:3.12-alpine
 RUN pip install --no-cache-dir websocket-client==1.8.0 openpyxl==3.1.5
 WORKDIR /app
-# Sources mounted at runtime from ./platform
+COPY tuya_import_ui.py tuya_csv.py ./
 CMD ["python", "-u", "/app/tuya_import_ui.py"]
