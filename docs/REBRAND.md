@@ -31,6 +31,7 @@ Owner setup + password-reset hook contract (for BMS implementers): [`BMS_OWNER_A
 - [x] Getting started + Company access panels (product copy)
 - [x] Enroll / import UIs titled Home Box (import: “Apply on Home Box”, not HA)
 - [x] Overview / sidebar / tab title → **Home Box** (frontend asset patch at image build + `/local/home-box-brand.js`)
+- [x] Stock HA **Apps** store (`/config/apps*`) diverted to Home Box **Extras** (`/extras`) — no HA OS app-store page
 - [x] Agent version string `home-box-0.1` (not `ha-lab`)
 - [ ] Operator UI wording on BMS (other team / other repo)
 

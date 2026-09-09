@@ -34,6 +34,18 @@ REPLACEMENTS: list[tuple[str, str]] = [
     ("`Home Assistant`", f"`{BRAND}`"),
     ("Hello from Home Assistant.", f"Hello from {BRAND}."),
     ("Hello from Home Assistant", f"Hello from {BRAND}"),
+    (
+        "Apps require the Home Assistant Operating System",
+        f"Apps are not part of {BRAND}",
+    ),
+    (
+        "Why you see this page instead of an app store",
+        f"Home Box does not include an app store",
+    ),
+    (
+        "What is an app?",
+        "What are extras on Home Box?",
+    ),
 ]
 
 RESTORE: list[tuple[str, str]] = [
