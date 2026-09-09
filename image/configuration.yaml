@@ -69,5 +69,5 @@ panel_custom:
     sidebar_title: Extras
     sidebar_icon: mdi:puzzle-outline
     url_path: extras
-    module_url: /local/home-box-extras.js?v=20260909-extras
+    module_url: /local/home-box-extras.js?v=20260909-ux
     require_admin: true
