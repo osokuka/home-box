@@ -1,0 +1,9 @@
+# Never bake runtime secrets or this machine's config into the image.
+config
+secrets.yaml
+.env
+*.env
+docker-hub.env
+**/__pycache__
+*.pyc
+.git

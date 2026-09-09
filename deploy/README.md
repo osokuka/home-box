@@ -17,7 +17,9 @@ cd deploy
 .\deploy.ps1
 ```
 
-The script writes a local `.env` (timezone, port, data dir, LAN SOCKS flag). **No BMS tokens or passwords** are required — open `/enroll/` and scan the prepare-box QR.
+The script writes a local `.env` (timezone, port, data dir, LAN SOCKS flag) and seeds `data/config/secrets.yaml` with **placeholder URLs only**. **No BMS tokens, enroll secrets, or lab machine values** are in the Hub images or in `.env`. Open `/enroll/` and scan the prepare-box QR.
+
+Images are built with `.dockerignore` so `config/`, `.env`, and `scripts/docker-hub.env` never enter the build context.
 
 ## Images (`avniademi/*`)
 
