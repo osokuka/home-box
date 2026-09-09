@@ -82,7 +82,9 @@ Example entity IDs on this lab box:
 | `0x06` | Read 16 outputs (2 packed bytes) |
 | `0x01` | Output control (channel mask + on/off) |
 
-Polling defaults to ~500 ms for both DI and DO while healthy. Connection is persistent TCP: on failure the client disconnects, backs off (1s → 30s), and force-resets the socket every few failures so entities recover when the LAN/SOCKS path returns without a manual reload.
+Polling defaults to ~500 ms for both DI and DO while healthy. Connection is persistent TCP with **keepalive**, reconnect backoff capped at **5s**, and a **~20s** last-known-state grace so brief LAN/SOCKS idle drops do not flip entities to unavailable. On failure the client disconnects, backs off, and force-resets the socket every few failures so entities recover when the LAN/SOCKS path returns without a manual reload.
+
+**Windows lab:** keep `tuya\socks5-windows.ps1` running (start after each reboot). If the PC sleeps or the SOCKS process exits, HLK will look lost until SOCKS is back — the integration will self-heal within the grace/backoff window.
 
 ## Source layout
 
@@ -104,7 +106,7 @@ Protocol framing was cross-checked against the MIT-licensed [jameshilliard/hlk-d
 | Symptom | Check |
 | --- | --- |
 | Config flow / smoke: timeout from container | SOCKS script running? `lan-router` up? `ENABLE_LAN_SOCKS=1`? |
-| Host ping works, HA shows device unavailable | Start `tuya/socks5-windows.ps1` (required after every Windows reboot). Integration self-heals once SOCKS is back; wait up to ~30s or reload HLK if stuck |
+| Host ping works, HA shows device unavailable | Start `tuya/socks5-windows.ps1` (required after every Windows reboot; keep it running while HA is up). Integration self-heals once SOCKS is back; wait up to ~20s grace / few retries, or reload HLK if stuck |
 | Host ping + SOCKS OK, HA still unavailable after HA restart | Orphaned `lan-router` netns — `docker compose up -d --force-recreate lan-router` |
 | Host ping works, HA does not | Docker Desktop LAN path — SOCKS required on Windows lab |
 | Smoke test fails while integration is loaded | Device allows **one TCP client**; unload/disable the integration first, or trust HA’s connection |

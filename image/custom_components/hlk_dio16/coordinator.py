@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from datetime import timedelta
 import logging
+import time
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import HlkDio16Client
-from .const import SCAN_INTERVAL_SECONDS
+from .const import AVAILABILITY_GRACE_SECONDS, SCAN_INTERVAL_SECONDS
 from .exceptions import HlkDio16Error
 from .reconnect import ReconnectPolicy
 
@@ -29,6 +30,7 @@ class HlkDio16Coordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self._reconnect = ReconnectPolicy()
+        self._last_success_mono: float | None = None
 
     async def _async_update_data(self) -> dict[str, Any]:
         try:
@@ -37,11 +39,11 @@ class HlkDio16Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             inputs = await self.client.read_inputs()
             outputs = await self.client.read_outputs()
         except HlkDio16Error as err:
-            await self._async_note_failure(err)
-            raise UpdateFailed(str(err)) from err
+            return await self._async_handle_failure(err)
 
         prior_failures = self._reconnect.failures
         self._apply_interval(self._reconnect.on_success())
+        self._last_success_mono = time.monotonic()
         if prior_failures:
             _LOGGER.warning(
                 "HLK-DIO16 %s:%s recovered after %s failure(s)",
@@ -61,12 +63,24 @@ class HlkDio16Coordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(str(err)) from err
 
         self._apply_interval(self._reconnect.on_success())
+        self._last_success_mono = time.monotonic()
         self.async_set_updated_data({"inputs": inputs, "outputs": outputs})
+
+    async def _async_handle_failure(self, err: HlkDio16Error) -> dict[str, Any]:
+        """Drop the socket, back off, and keep last data during a short grace."""
+        await self._async_note_failure(err)
+        if self._within_grace() and isinstance(self.data, dict):
+            _LOGGER.debug(
+                "HLK-DIO16 %s:%s serving last-known state during grace",
+                self.client.host,
+                self.client.port,
+            )
+            return self.data
+        raise UpdateFailed(str(err)) from err
 
     async def _async_note_failure(self, err: HlkDio16Error) -> None:
         delay, force_reset = self._reconnect.on_failure()
         self._apply_interval(delay)
-        # Always drop the socket so the next poll opens a fresh TCP session.
         await self.client.disconnect()
         if force_reset:
             _LOGGER.warning(
@@ -84,6 +98,11 @@ class HlkDio16Coordinator(DataUpdateCoordinator[dict[str, Any]]):
                 err,
                 delay,
             )
+
+    def _within_grace(self) -> bool:
+        if self._last_success_mono is None or not self.data:
+            return False
+        return (time.monotonic() - self._last_success_mono) <= AVAILABILITY_GRACE_SECONDS
 
     def _apply_interval(self, seconds: float) -> None:
         new_interval = timedelta(seconds=seconds)

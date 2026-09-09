@@ -13,9 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from typing import Any
 
-from .const import Command, DEFAULT_PORT
+from .const import (
+    Command,
+    DEFAULT_PORT,
+    TCP_KEEPCNT,
+    TCP_KEEPIDLE_SECONDS,
+    TCP_KEEPINTVL_SECONDS,
+)
 from .exceptions import (
     HlkDio16ConnectionError,
     HlkDio16ProtocolError,
@@ -69,8 +76,32 @@ class HlkDio16Client:
             raise HlkDio16ConnectionError(
                 f"cannot connect to {self.host}:{self.port}: {err}"
             ) from err
+        self._enable_keepalive()
         self._buffer.clear()
         _LOGGER.info("Connected to HLK-DIO16 at %s:%s", self.host, self.port)
+
+    def _enable_keepalive(self) -> None:
+        """Detect half-open sockets after idle NAT/SOCKS drops."""
+        if self._writer is None:
+            return
+        sock = self._writer.get_extra_info("socket")
+        if sock is None:
+            return
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            if hasattr(socket, "TCP_KEEPIDLE"):
+                sock.setsockopt(
+                    socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, TCP_KEEPIDLE_SECONDS
+                )
+            if hasattr(socket, "TCP_KEEPINTVL"):
+                sock.setsockopt(
+                    socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, TCP_KEEPINTVL_SECONDS
+                )
+            if hasattr(socket, "TCP_KEEPCNT"):
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, TCP_KEEPCNT)
+            # Windows uses SIO_KEEPALIVE_VALS via ioctl in some stacks; ignore if absent.
+        except OSError as err:
+            _LOGGER.debug("HLK-DIO16 keepalive not applied: %s", err)
 
     async def disconnect(self) -> None:
         """Close the TCP connection. Never raises (safe from except handlers)."""
