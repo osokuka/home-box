@@ -4,6 +4,7 @@ Toggle lives on the box. Does NOT grant any company access by itself.
 Company visibility requires a separate BMS ShareGrant by the homeowner.
 
 sensors: [{entity_id, system}] — system is client-chosen classification (never inferred).
+categories: client-managed label list used by the Company access UI.
 sensor_entities: derived id list for older readers.
 """
 
@@ -23,6 +24,32 @@ DEFAULT_SCOPE = ["status", "support_activity", "sensors"]
 
 def share_path() -> Path:
     return SHARE_PATH
+
+
+def _normalize_categories(raw: Any, sensors: list[dict[str, str]] | None = None) -> list[str]:
+    """Client category labels (domain or location). Never invent defaults."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw if isinstance(raw, list) else []:
+        slug = ""
+        try:
+            from sensor_feed import classify_system
+
+            slug = classify_system(item)
+        except ImportError:
+            slug = str(item or "").strip().lower().replace(" ", "-")
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        out.append(slug)
+    for row in sensors or []:
+        slug = str((row or {}).get("system") or "").strip()
+        if not slug or slug in seen:
+            continue
+        seen.add(slug)
+        out.append(slug)
+    out.sort()
+    return out
 
 
 def _normalize_entries(raw: Any) -> list[dict[str, str]]:
@@ -56,6 +83,7 @@ def load_share() -> dict[str, Any]:
         "v": 2,
         "limited_share_enabled": False,
         "scope": list(DEFAULT_SCOPE),
+        "categories": [],
         "sensors": [],
         "sensor_entities": [],
         "updated_at": None,
@@ -72,10 +100,12 @@ def load_share() -> dict[str, Any]:
     if raw is None:
         raw = data.get("sensor_entities")
     sensors = _normalize_entries(raw)
+    categories = _normalize_categories(data.get("categories"), sensors)
     return {
         "v": 2,
         "limited_share_enabled": bool(data.get("limited_share_enabled")),
         "scope": list(data.get("scope") or DEFAULT_SCOPE),
+        "categories": categories,
         "sensors": sensors,
         "sensor_entities": [s["entity_id"] for s in sensors],
         "updated_at": data.get("updated_at"),
@@ -91,6 +121,7 @@ def set_limited_share(
     enabled: bool,
     sensors: list[Any] | None = None,
     sensor_entities: list[Any] | None = None,
+    categories: list[Any] | None = None,
 ) -> dict[str, Any]:
     current = load_share()
     if sensors is not None:
@@ -108,10 +139,15 @@ def set_limited_share(
         entries = _normalize_entries(merged)
     else:
         entries = list(current.get("sensors") or [])
+    if categories is not None:
+        cats = _normalize_categories(categories, entries)
+    else:
+        cats = _normalize_categories(current.get("categories"), entries)
     body = {
         "v": 2,
         "limited_share_enabled": bool(enabled),
         "scope": list(DEFAULT_SCOPE),
+        "categories": cats,
         "sensors": entries,
         "sensor_entities": [s["entity_id"] for s in entries],
         "updated_at": datetime.now(timezone.utc).isoformat(),

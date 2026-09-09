@@ -1,10 +1,16 @@
 class HomeBoxCompanyAccess extends HTMLElement {
   _hass;
   _busy = false;
+  _dirty = false;
   _available = [];
-  /** @type {Map<string, string>} entity_id -> client classification */
+  /** @type {string[]} */
+  _categories = [];
+  /** @type {Map<string, string>} entity_id -> category slug */
   _classifications = new Map();
+  /** @type {Set<string>} */
   _selected = new Set();
+  _shareOn = false;
+  _savedSnapshot = "";
 
   connectedCallback() {
     this.render();
@@ -18,6 +24,23 @@ class HomeBoxCompanyAccess extends HTMLElement {
 
   get hass() {
     return this._hass;
+  }
+
+  slug(raw) {
+    return String(raw || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  escapeHtml(s) {
+    return String(s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   async api(method, path, body) {
@@ -37,24 +60,56 @@ class HomeBoxCompanyAccess extends HTMLElement {
     return data;
   }
 
+  snapshot() {
+    const sensors = [...this._selected]
+      .sort()
+      .map((id) => id + ":" + (this._classifications.get(id) || ""));
+    return JSON.stringify({
+      on: this._shareOn,
+      cats: [...this._categories].sort(),
+      sensors,
+    });
+  }
+
+  markDirty() {
+    this._dirty = this.snapshot() !== this._savedSnapshot;
+    this.syncChrome();
+  }
+
+  syncChrome() {
+    const saveBtn = this.querySelector("#saveBtn");
+    const discardBtn = this.querySelector("#discardBtn");
+    const dirty = this.querySelector("#dirtyBadge");
+    const bar = this.querySelector("#saveBar");
+    if (saveBtn) {
+      saveBtn.disabled = this._busy || !this._dirty;
+      saveBtn.textContent = this._busy ? "Saving…" : "Save changes";
+    }
+    if (discardBtn) discardBtn.disabled = this._busy || !this._dirty;
+    if (dirty) {
+      dirty.hidden = !this._dirty;
+      dirty.textContent = this._dirty ? "Unsaved changes" : "";
+    }
+    if (bar) bar.classList.toggle("active", this._dirty);
+    const status = this.querySelector("#shareStatus");
+    if (status && !status.classList.contains("err-load")) {
+      status.textContent = this._shareOn
+        ? "Sensory share is ON after you save. Selected sensors leave with the category you assign. Companies still need a BMS grant."
+        : "Sensory share is OFF after you save — nothing is posted for companies.";
+      status.className = this._shareOn ? "banner ok" : "banner warn";
+    }
+  }
+
   async refresh() {
     const status = this.querySelector("#shareStatus");
-    const toggle = this.querySelector("#shareToggle");
-    const grants = this.querySelector("#grantList");
-    const sensorBox = this.querySelector("#sensorList");
     if (!status || !this._hass) return;
     try {
       const data = await this.api("GET", "/api/home_box/limited_share");
-      const on = !!data.limited_share_enabled;
-      status.textContent = on
-        ? "Sensory share is ON — selected sensors leave with the classification you set. No company sees them until you grant that company in BMS."
-        : "Sensory share is OFF — nothing is posted for companies.";
-      status.className = on ? "ok" : "warn";
-      if (toggle) toggle.checked = on;
-
+      this._shareOn = !!data.limited_share_enabled;
       this._available = Array.isArray(data.available_sensors)
         ? data.available_sensors
         : [];
+
       this._selected = new Set();
       this._classifications = new Map();
       const saved = Array.isArray(data.sensors) ? data.sensors : [];
@@ -62,228 +117,559 @@ class HomeBoxCompanyAccess extends HTMLElement {
         const id = String((row && row.entity_id) || "").toLowerCase();
         if (!id) continue;
         this._selected.add(id);
-        this._classifications.set(id, String((row && row.system) || ""));
+        this._classifications.set(id, this.slug((row && row.system) || ""));
       }
-      // Legacy id-only list
       for (const eid of data.sensor_entities || []) {
         const id = String(eid).toLowerCase();
         if (!this._selected.has(id)) this._selected.add(id);
         if (!this._classifications.has(id)) this._classifications.set(id, "");
       }
-      if (sensorBox) this.renderSensors(sensorBox);
 
-      if (grants) {
-        const list = data.active_company_grants || [];
-        if (!list.length) {
-          grants.innerHTML =
-            "<p class='muted'>No company grants visible yet. After you enable share, grant a company in BMS for the domains you use.</p>";
-        } else {
-          grants.innerHTML =
-            "<ul>" +
-            list
-              .map(
-                (g) =>
-                  "<li>" +
-                  (g.company_name || g.company_slug || g.company_id || "company") +
-                  " — domains: " +
-                  ((g.domains || []).join(", ") || "—") +
-                  "</li>"
-              )
-              .join("") +
-            "</ul>";
-        }
+      const fromApi = Array.isArray(data.categories) ? data.categories : [];
+      const cats = new Set();
+      for (const c of fromApi) {
+        const s = this.slug(c);
+        if (s) cats.add(s);
       }
+      for (const v of this._classifications.values()) {
+        if (v) cats.add(v);
+      }
+      this._categories = [...cats].sort();
+
+      this._savedSnapshot = this.snapshot();
+      this._dirty = false;
+      this.renderCategories();
+      this.renderSensors();
+      this.renderGrants(data.active_company_grants || []);
+      const toggle = this.querySelector("#shareToggle");
+      if (toggle) toggle.checked = this._shareOn;
+      this.setMsg("");
+      this.syncChrome();
     } catch (e) {
       status.textContent = "Could not load share status: " + (e.message || e);
-      status.className = "warn";
+      status.className = "banner warn err-load";
     }
   }
 
-  renderSensors(host) {
-    if (!this._available.length) {
+  renderCategories() {
+    const host = this.querySelector("#categoryList");
+    if (!host) return;
+    if (!this._categories.length) {
       host.innerHTML =
-        "<p class='muted'>No binary sensors found yet. Add HLK-DIO16 (or other) sensors first.</p>";
+        "<p class='muted empty'>No categories yet. Add one below (domain or location).</p>";
       return;
     }
-    host.innerHTML = this._available
+    host.innerHTML = this._categories
+      .map(
+        (c) =>
+          "<span class='chip' data-cat='" +
+          this.escapeHtml(c) +
+          "'>" +
+          "<span class='chip-label'>" +
+          this.escapeHtml(c) +
+          "</span>" +
+          "<button type='button' class='chip-x' data-remove='" +
+          this.escapeHtml(c) +
+          "' title='Remove category' aria-label='Remove " +
+          this.escapeHtml(c) +
+          "'>×</button>" +
+          "</span>"
+      )
+      .join("");
+    host.querySelectorAll("[data-remove]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const cat = btn.getAttribute("data-remove");
+        this._categories = this._categories.filter((c) => c !== cat);
+        for (const [eid, val] of [...this._classifications.entries()]) {
+          if (val === cat) this._classifications.set(eid, "");
+        }
+        this.renderCategories();
+        this.renderSensors();
+        this.markDirty();
+      });
+    });
+  }
+
+  addCategory() {
+    const input = this.querySelector("#newCategory");
+    if (!input) return;
+    const cat = this.slug(input.value);
+    if (!cat) {
+      this.setMsg("Enter a category name (e.g. security, kitchen).", true);
+      return;
+    }
+    if (!this._categories.includes(cat)) {
+      this._categories = [...this._categories, cat].sort();
+    }
+    input.value = "";
+    this.renderCategories();
+    this.renderSensors();
+    this.markDirty();
+    this.setMsg("Category “" + cat + "” added — click Save changes when ready.");
+  }
+
+  categoryOptions(selected) {
+    const opts = [
+      "<option value=''>" +
+        (selected ? "Choose category…" : "— not set —") +
+        "</option>",
+    ];
+    for (const c of this._categories) {
+      opts.push(
+        "<option value='" +
+          this.escapeHtml(c) +
+          "'" +
+          (c === selected ? " selected" : "") +
+          ">" +
+          this.escapeHtml(c) +
+          "</option>"
+      );
+    }
+    if (selected && !this._categories.includes(selected)) {
+      opts.push(
+        "<option value='" +
+          this.escapeHtml(selected) +
+          "' selected>" +
+          this.escapeHtml(selected) +
+          " (missing from list)</option>"
+      );
+    }
+    return opts.join("");
+  }
+
+  renderSensors() {
+    const host = this.querySelector("#sensorList");
+    const countEl = this.querySelector("#selectedCount");
+    if (countEl) {
+      countEl.textContent =
+        this._selected.size +
+        " of " +
+        this._available.length +
+        " selected for share";
+    }
+    if (!host) return;
+    if (!this._available.length) {
+      host.innerHTML =
+        "<p class='muted empty'>No binary sensors found yet. Add HLK-DIO16 (or other) sensors first.</p>";
+      return;
+    }
+    const filter = String(
+      (this.querySelector("#sensorFilter") || {}).value || ""
+    )
+      .trim()
+      .toLowerCase();
+    const rows = this._available.filter((s) => {
+      if (!filter) return true;
+      const id = String(s.entity_id || "").toLowerCase();
+      const name = String(s.name || "").toLowerCase();
+      return id.includes(filter) || name.includes(filter);
+    });
+    if (!rows.length) {
+      host.innerHTML = "<p class='muted empty'>No sensors match this filter.</p>";
+      return;
+    }
+    host.innerHTML = rows
       .map((s) => {
         const id = String(s.entity_id || "").toLowerCase();
-        const checked = this._selected.has(id) ? "checked" : "";
-        const classify = this._classifications.get(id) || "";
+        const on = this._selected.has(id);
+        const cat = this._classifications.get(id) || "";
         const label = s.name || id;
+        const state = s.state != null ? String(s.state) : "";
         return (
-          "<div class='sensor'>" +
+          "<div class='sensor" +
+          (on ? " on" : "") +
+          "' data-row='" +
+          this.escapeHtml(id) +
+          "'>" +
           "<label class='check'>" +
           "<input type='checkbox' data-eid='" +
-          id +
+          this.escapeHtml(id) +
           "' " +
-          checked +
+          (on ? "checked" : "") +
           "/>" +
-          "<span>" +
-          label +
-          " <code>" +
-          id +
-          "</code></span>" +
+          "<span class='meta'>" +
+          "<span class='name'>" +
+          this.escapeHtml(label) +
+          "</span>" +
+          "<code class='eid'>" +
+          this.escapeHtml(id) +
+          "</code>" +
+          (state
+            ? "<span class='state' data-state='" +
+              this.escapeHtml(state) +
+              "'>" +
+              this.escapeHtml(state) +
+              "</span>"
+            : "") +
+          "</span>" +
           "</label>" +
-          "<label class='classify'>Your label (domain or location)" +
-          "<input type='text' data-sys='" +
-          id +
-          "' value='" +
-          classify.replace(/'/g, "&#39;") +
-          "' placeholder='e.g. hvac, security, kitchen, front-door' " +
-          (checked ? "" : "disabled ") +
-          "/>" +
+          "<label class='classify'>" +
+          "<span>Category</span>" +
+          "<select data-sys='" +
+          this.escapeHtml(id) +
+          "' " +
+          (on ? "" : "disabled ") +
+          ">" +
+          this.categoryOptions(cat) +
+          "</select>" +
           "</label>" +
           "</div>"
         );
       })
       .join("");
+
     host.querySelectorAll("input[type=checkbox]").forEach((el) => {
       el.addEventListener("change", () => {
         const id = el.getAttribute("data-eid");
-        const sys = host.querySelector("input[data-sys='" + id + "']");
-        if (sys) sys.disabled = !el.checked;
-        this.onSensorChange();
+        if (el.checked) this._selected.add(id);
+        else {
+          this._selected.delete(id);
+        }
+        const sel = host.querySelector("select[data-sys='" + id + "']");
+        if (sel) sel.disabled = !el.checked;
+        const row = host.querySelector("[data-row='" + id + "']");
+        if (row) row.classList.toggle("on", el.checked);
+        this.markDirty();
+        if (countEl) {
+          countEl.textContent =
+            this._selected.size +
+            " of " +
+            this._available.length +
+            " selected for share";
+        }
       });
     });
-    host.querySelectorAll("input[type=text]").forEach((el) => {
-      el.addEventListener("change", () => this.onSensorChange());
-      el.addEventListener("blur", () => this.onSensorChange());
+    host.querySelectorAll("select[data-sys]").forEach((el) => {
+      el.addEventListener("change", () => {
+        const id = el.getAttribute("data-sys");
+        const val = this.slug(el.value);
+        this._classifications.set(id, val);
+        if (val && !this._categories.includes(val)) {
+          this._categories = [...this._categories, val].sort();
+          this.renderCategories();
+        }
+        this.markDirty();
+      });
     });
   }
 
-  selectedSensors() {
-    const host = this.querySelector("#sensorList");
+  renderGrants(list) {
+    const grants = this.querySelector("#grantList");
+    if (!grants) return;
+    if (!list.length) {
+      grants.innerHTML =
+        "<p class='muted'>No company grants visible yet. After share is on, grant a company in BMS.</p>";
+      return;
+    }
+    grants.innerHTML =
+      "<ul class='grants'>" +
+      list
+        .map(
+          (g) =>
+            "<li><strong>" +
+            this.escapeHtml(
+              g.company_name || g.company_slug || g.company_id || "company"
+            ) +
+            "</strong> — domains: " +
+            this.escapeHtml((g.domains || []).join(", ") || "—") +
+            "</li>"
+        )
+        .join("") +
+      "</ul>";
+  }
+
+  draftSensors() {
     const out = [];
-    if (!host) return out;
-    host.querySelectorAll("input[type=checkbox]").forEach((el) => {
-      if (!el.checked) return;
-      const id = el.getAttribute("data-eid");
-      const sysEl = host.querySelector("input[data-sys='" + id + "']");
+    for (const id of this._selected) {
       out.push({
         entity_id: id,
-        system: ((sysEl && sysEl.value) || "").trim().toLowerCase(),
+        system: this._classifications.get(id) || "",
       });
-    });
+    }
     return out;
   }
 
-  async onSensorChange() {
-    if (this._busy || !this._hass) return;
-    this._busy = true;
+  setMsg(text, isErr) {
     const msg = this.querySelector("#shareMsg");
-    try {
-      const toggle = this.querySelector("#shareToggle");
-      const sensors = this.selectedSensors();
-      this._selected = new Set(sensors.map((s) => s.entity_id));
-      this._classifications = new Map(
-        sensors.map((s) => [s.entity_id, s.system || ""])
+    if (!msg) return;
+    msg.textContent = text || "";
+    msg.className = "msg" + (isErr ? " err" : text ? " ok-msg" : "");
+  }
+
+  async onSave() {
+    if (this._busy || !this._hass || !this._dirty) return;
+    const sensors = this.draftSensors();
+    const missing = sensors.filter((s) => !s.system);
+    if (missing.length) {
+      this.setMsg(
+        "Assign a category to every selected sensor before saving (" +
+          missing.length +
+          " missing).",
+        true
       );
+      return;
+    }
+    this._busy = true;
+    this.syncChrome();
+    try {
       await this.api("POST", "/api/home_box/limited_share", {
-        enabled: !!(toggle && toggle.checked),
+        enabled: this._shareOn,
         sensors,
+        categories: this._categories,
       });
-      if (msg) {
-        msg.textContent =
-          "Saved " +
+      this._savedSnapshot = this.snapshot();
+      this._dirty = false;
+      this.setMsg(
+        "Saved. " +
           sensors.length +
-          " sensor(s). Catalog pushed to BMS with your classifications.";
-        msg.className = "msg";
-      }
+          " sensor(s) will sync to BMS with your categories."
+      );
+      this.syncChrome();
+      await this.refresh();
+      this.setMsg(
+        "Saved. " +
+          sensors.length +
+          " sensor(s) will sync to BMS with your categories."
+      );
     } catch (e) {
-      if (msg) {
-        msg.textContent = e.message || String(e);
-        msg.className = "msg err";
-      }
+      this.setMsg(e.message || String(e), true);
     } finally {
       this._busy = false;
+      this.syncChrome();
     }
   }
 
-  async onToggle(ev) {
-    if (this._busy || !this._hass) return;
-    this._busy = true;
-    const msg = this.querySelector("#shareMsg");
-    const enabled = !!ev.target.checked;
-    try {
-      await this.api("POST", "/api/home_box/limited_share", {
-        enabled,
-        sensors: this.selectedSensors(),
-      });
-      if (msg) {
-        msg.textContent = enabled
-          ? "Enabled. Label each sensor (domain or location); grant access in BMS."
-          : "Disabled. Sensory feed will stop posting.";
-        msg.className = "msg";
-      }
-      await this.refresh();
-    } catch (e) {
-      if (msg) {
-        msg.textContent = e.message || String(e);
-        msg.className = "msg err";
-      }
-      ev.target.checked = !enabled;
-    } finally {
-      this._busy = false;
-    }
+  async onDiscard() {
+    if (this._busy || !this._dirty) return;
+    await this.refresh();
+    this.setMsg("Discarded unsaved changes.");
   }
 
   render() {
     this.innerHTML = `
       <style>
-        :host { display: block; padding: 24px; max-width: 44rem; font-family: system-ui, sans-serif; line-height: 1.45; color: #1a1f1c; }
-        h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
-        h2 { font-size: 1.1rem; margin: 1.4rem 0 0.45rem; }
-        code { background: #e8eee9; padding: 0.1em 0.35em; font-size: 0.85em; }
-        ul { padding-left: 1.2rem; }
-        .warn { border-left: 4px solid #c4a35a; padding-left: 12px; }
-        .ok { border-left: 4px solid #2f6f4e; padding-left: 12px; }
-        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
-        .brand img { height: 40px; }
-        .row { display: flex; align-items: center; gap: 12px; margin: 1rem 0; padding: 0.85rem 1rem; background: #f4f7f5; border: 1px solid #c5d0c8; }
-        .row label { font-weight: 600; flex: 1; }
-        .muted { color: #5c6b63; font-size: 0.92rem; }
-        .msg { margin-top: 0.5rem; font-size: 0.9rem; }
-        .err { color: #8b2e2e; }
-        input[type=checkbox] { width: 1.25rem; height: 1.25rem; }
-        #sensorList { display: flex; flex-direction: column; gap: 0.55rem; margin: 0.75rem 0 1rem; }
-        .sensor { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.55rem 0.65rem; background: #f4f7f5; border: 1px solid #c5d0c8; }
-        .check { display: flex; gap: 0.6rem; align-items: flex-start; }
-        .check span { flex: 1; font-size: 0.92rem; }
-        .classify { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: #5c6b63; }
-        .classify input[type=text] { padding: 0.35rem 0.45rem; border: 1px solid #c5d0c8; font: inherit; color: #1a1f1c; }
-        .classify input[type=text]:disabled { opacity: 0.5; }
+        :host {
+          display: block;
+          padding: 1.25rem 1.25rem 5.5rem;
+          max-width: 42rem;
+          font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+          line-height: 1.45;
+          color: #14201a;
+          background:
+            radial-gradient(ellipse 80% 50% at 0% 0%, #d8ebe0 0%, transparent 55%),
+            linear-gradient(180deg, #f3f7f4 0%, #e8efe9 100%);
+          min-height: 100%;
+          box-sizing: border-box;
+        }
+        * { box-sizing: border-box; }
+        h1 { font-size: 1.55rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
+        h2 { font-size: 1.05rem; margin: 0 0 0.4rem; font-weight: 650; }
+        h3 { font-size: 0.92rem; margin: 0 0 0.45rem; font-weight: 650; color: #2a3d33; }
+        code, .eid {
+          font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+          font-size: 0.78rem;
+          background: #e2ebe5;
+          padding: 0.12em 0.4em;
+          border-radius: 3px;
+          word-break: break-all;
+        }
+        .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 0.75rem; }
+        .brand img { height: 36px; }
+        .lede { color: #4a5c52; font-size: 0.95rem; margin: 0 0 1.1rem; max-width: 36rem; }
+        .banner {
+          margin: 0 0 1rem;
+          padding: 0.7rem 0.85rem;
+          border-radius: 6px;
+          border: 1px solid transparent;
+          font-size: 0.92rem;
+        }
+        .banner.ok { background: #e4f2ea; border-color: #9fc4ae; color: #1e4d34; }
+        .banner.warn { background: #f7f0e0; border-color: #d4bc7a; color: #5c4a1e; }
+        .section {
+          margin: 0 0 1.15rem;
+          padding: 1rem 1.05rem 1.1rem;
+          background: rgba(255,255,255,0.72);
+          border: 1px solid #c5d4cb;
+          border-radius: 8px;
+        }
+        .section-head {
+          display: flex; flex-wrap: wrap; align-items: baseline;
+          justify-content: space-between; gap: 0.4rem 1rem; margin-bottom: 0.55rem;
+        }
+        .muted { color: #5c6b63; font-size: 0.9rem; margin: 0 0 0.65rem; }
+        .empty { margin: 0.35rem 0; }
+        .row-toggle {
+          display: flex; align-items: center; gap: 12px;
+          padding: 0.65rem 0.75rem; background: #eef4f0; border-radius: 6px;
+          border: 1px solid #c5d4cb;
+        }
+        .row-toggle label { font-weight: 650; flex: 1; }
+        input[type=checkbox] { width: 1.2rem; height: 1.2rem; accent-color: #2f6f4e; }
+        .cat-add { display: flex; gap: 0.45rem; margin-top: 0.65rem; flex-wrap: wrap; }
+        .cat-add input[type=text], .filter input[type=search], .classify select {
+          flex: 1; min-width: 10rem; padding: 0.45rem 0.55rem;
+          border: 1px solid #b7c7bd; border-radius: 5px; font: inherit; background: #fff;
+        }
+        .btn {
+          appearance: none; border: 1px solid #2f6f4e; background: #2f6f4e; color: #fff;
+          font: inherit; font-weight: 600; padding: 0.45rem 0.85rem; border-radius: 5px;
+          cursor: pointer;
+        }
+        .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .btn.secondary { background: #fff; color: #2a3d33; border-color: #b7c7bd; }
+        .btn.ghost { background: transparent; color: #2a3d33; border-color: transparent; }
+        .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; min-height: 1.75rem; }
+        .chip {
+          display: inline-flex; align-items: center; gap: 0.25rem;
+          padding: 0.2rem 0.25rem 0.2rem 0.55rem; background: #dceae2;
+          border: 1px solid #a8c4b4; border-radius: 999px; font-size: 0.86rem; font-weight: 600;
+        }
+        .chip-x {
+          border: 0; background: transparent; color: #3d5a4a; cursor: pointer;
+          font-size: 1.05rem; line-height: 1; padding: 0 0.35rem; border-radius: 999px;
+        }
+        .chip-x:hover { background: #c5ddd0; }
+        .toolbar {
+          display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center;
+          margin-bottom: 0.65rem;
+        }
+        .filter { flex: 1; min-width: 12rem; }
+        .count { font-size: 0.86rem; color: #4a5c52; font-weight: 600; }
+        #sensorList { display: flex; flex-direction: column; gap: 0.45rem; }
+        .sensor {
+          display: grid; grid-template-columns: 1fr minmax(9rem, 11rem);
+          gap: 0.55rem 0.75rem; align-items: center;
+          padding: 0.65rem 0.7rem; background: #f7faf8;
+          border: 1px solid #c5d4cb; border-radius: 6px; transition: border-color 0.15s, background 0.15s;
+        }
+        .sensor.on { background: #eef6f1; border-color: #8fb89d; }
+        .check { display: flex; gap: 0.65rem; align-items: flex-start; margin: 0; }
+        .meta { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+        .name { font-weight: 650; font-size: 0.95rem; }
+        .state {
+          display: inline-block; width: fit-content; font-size: 0.75rem; font-weight: 650;
+          text-transform: uppercase; letter-spacing: 0.03em;
+          padding: 0.1rem 0.4rem; border-radius: 3px; background: #dde6e1; color: #3d5247;
+        }
+        .state[data-state="on"] { background: #cfe8d8; color: #1e4d34; }
+        .state[data-state="off"] { background: #e4e8e5; color: #5c6b63; }
+        .classify { display: flex; flex-direction: column; gap: 0.2rem; margin: 0;
+          font-size: 0.78rem; color: #5c6b63; font-weight: 600; }
+        .classify select:disabled { opacity: 0.45; }
+        .grants { margin: 0; padding-left: 1.15rem; }
+        .grants li { margin: 0.25rem 0; }
+        .msg { min-height: 1.25rem; margin: 0.35rem 0 0; font-size: 0.9rem; }
+        .msg.ok-msg { color: #1e4d34; font-weight: 600; }
+        .msg.err { color: #8b2e2e; font-weight: 600; }
+        #saveBar {
+          position: sticky; bottom: 0; left: 0; right: 0;
+          margin: 1.25rem -1.25rem -1.25rem; padding: 0.85rem 1.25rem;
+          display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center;
+          background: #1a2e24; color: #e8f2ec; border-top: 1px solid #2f4a3c;
+          opacity: 0.92; transition: box-shadow 0.2s;
+        }
+        #saveBar.active { box-shadow: 0 -8px 24px rgba(20, 40, 30, 0.18); opacity: 1; }
+        #dirtyBadge {
+          flex: 1; font-size: 0.88rem; font-weight: 650; color: #f0d9a0;
+        }
+        #saveBar .btn { border-color: #3d8f64; }
+        #saveBar .btn.secondary { background: transparent; color: #e8f2ec; border-color: #5a7568; }
+        @media (max-width: 560px) {
+          .sensor { grid-template-columns: 1fr; }
+        }
       </style>
+
       <div class="brand">
         <img src="/local/home-box-logo.svg" alt="Home Box" />
       </div>
       <h1>Company access</h1>
-
-      <h2>Sensory share (this box)</h2>
-      <p class="warn" id="shareStatus">Loading…</p>
-      <p class="muted">
-        You choose <strong>which</strong> sensors leave and <strong>how each is labeled</strong>
-        — by domain (<code>hvac</code>, <code>security</code>) or by location
-        (<code>kitchen</code>, <code>front-door</code>). Each client decides their own labels;
-        Home Box never invents them. Changing the list pushes the catalog to BMS.
-        You still choose <strong>who</strong> sees them via grants in BMS.
-        Relays/switches are never shared.
+      <p class="lede">
+        Choose which sensors leave this box, organize them into your own categories
+        (domain or location), then <strong>Save</strong>. Companies only see data after a BMS grant.
+        Relays and switches are never shared.
       </p>
-      <div class="row">
-        <label for="shareToggle">Allow sensory share to BMS</label>
-        <input type="checkbox" id="shareToggle" />
+
+      <p class="banner warn" id="shareStatus">Loading…</p>
+
+      <section class="section" aria-labelledby="share-heading">
+        <h2 id="share-heading">1. Sensory share</h2>
+        <p class="muted">Master switch for this Home Box. Takes effect when you save.</p>
+        <div class="row-toggle">
+          <label for="shareToggle">Allow sensory share to BMS</label>
+          <input type="checkbox" id="shareToggle" />
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="cat-heading">
+        <div class="section-head">
+          <h2 id="cat-heading">2. Categories</h2>
+        </div>
+        <p class="muted">
+          Create labels once, then assign them to sensors. Use domains
+          (<code>hvac</code>, <code>security</code>) or locations (<code>kitchen</code>, <code>front-door</code>).
+        </p>
+        <h3>Your categories</h3>
+        <div class="chips" id="categoryList"></div>
+        <div class="cat-add">
+          <input type="text" id="newCategory" placeholder="New category name" autocomplete="off" />
+          <button type="button" class="btn secondary" id="addCategoryBtn">Add category</button>
+        </div>
+      </section>
+
+      <section class="section" aria-labelledby="sensor-heading">
+        <div class="section-head">
+          <h2 id="sensor-heading">3. Sensors for share</h2>
+          <span class="count" id="selectedCount">—</span>
+        </div>
+        <p class="muted">Check sensors to include, then pick a category for each. Unchecked sensors stay on the box only.</p>
+        <div class="toolbar">
+          <div class="filter">
+            <input type="search" id="sensorFilter" placeholder="Filter by name or entity id" />
+          </div>
+        </div>
+        <div id="sensorList"><p class="muted">Loading…</p></div>
+      </section>
+
+      <section class="section" aria-labelledby="grant-heading">
+        <h2 id="grant-heading">Company grants (from BMS)</h2>
+        <div id="grantList"><p class="muted">Loading…</p></div>
+      </section>
+
+      <div class="msg" id="shareMsg" role="status"></div>
+
+      <div id="saveBar" aria-live="polite">
+        <span id="dirtyBadge" hidden></span>
+        <button type="button" class="btn secondary" id="discardBtn" disabled>Discard</button>
+        <button type="button" class="btn" id="saveBtn" disabled>Save changes</button>
       </div>
-
-      <h2>Sensors to include</h2>
-      <p class="muted">Check a sensor, then give it your label (domain or location). Labels are pushed to BMS per sensor.</p>
-      <div id="sensorList"><p class="muted">Loading…</p></div>
-      <div class="msg" id="shareMsg"></div>
-
-      <h2>Company grants (from BMS)</h2>
-      <div id="grantList"><p class="muted">Loading…</p></div>
     `;
+
     const toggle = this.querySelector("#shareToggle");
-    if (toggle) toggle.addEventListener("change", (ev) => this.onToggle(ev));
+    if (toggle) {
+      toggle.addEventListener("change", () => {
+        this._shareOn = !!toggle.checked;
+        this.markDirty();
+      });
+    }
+    const addBtn = this.querySelector("#addCategoryBtn");
+    if (addBtn) addBtn.addEventListener("click", () => this.addCategory());
+    const newCat = this.querySelector("#newCategory");
+    if (newCat) {
+      newCat.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") {
+          ev.preventDefault();
+          this.addCategory();
+        }
+      });
+    }
+    const filter = this.querySelector("#sensorFilter");
+    if (filter) {
+      filter.addEventListener("input", () => this.renderSensors());
+    }
+    const saveBtn = this.querySelector("#saveBtn");
+    if (saveBtn) saveBtn.addEventListener("click", () => this.onSave());
+    const discardBtn = this.querySelector("#discardBtn");
+    if (discardBtn) discardBtn.addEventListener("click", () => this.onDiscard());
   }
 }
 customElements.define("home-box-company-access", HomeBoxCompanyAccess);

@@ -35,7 +35,8 @@ Passwords / device commands are never part of this path.
 ### `bms_share.json` shape
 
 `sensors`: `[{ "entity_id": "binary_sensor.…", "system": "<client label>" }]`  
-`system` is chosen **per sensor by the client** — domain (`hvac`, `security`, …) **or** location (`kitchen`, `front-door`, …).  
+`categories`: `[ "hvac", "security", "kitchen", … ]` — labels managed in Company access UI  
+`system` is chosen **per sensor by the client** — domain or location.  
 Home Box never invents or validates against a fixed list; it only slugs for transport.  
 `sensor_entities` remains a derived id list for older readers.
 

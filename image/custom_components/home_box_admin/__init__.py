@@ -344,9 +344,28 @@ def _share_sync_load() -> dict[str, Any]:
                 continue
             seen.add(eid)
             sensors.append({"entity_id": eid, "system": system})
+    cats: list[str] = []
+    cat_seen: set[str] = set()
+    for item in data.get("categories") if isinstance(data.get("categories"), list) else []:
+        slug = str(item or "").strip().lower().replace(" ", "-")
+        slug = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in slug)
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        slug = slug.strip("-")
+        if not slug or slug in cat_seen:
+            continue
+        cat_seen.add(slug)
+        cats.append(slug)
+    for row in sensors:
+        slug = str(row.get("system") or "").strip()
+        if slug and slug not in cat_seen:
+            cat_seen.add(slug)
+            cats.append(slug)
+    cats.sort()
     return {
         "limited_share_enabled": bool(data.get("limited_share_enabled")),
         "scope": list(data.get("scope") or ["status", "support_activity", "sensors"]),
+        "categories": cats,
         "sensors": sensors,
         "sensor_entities": [s["entity_id"] for s in sensors],
         "updated_at": data.get("updated_at"),
@@ -356,6 +375,7 @@ def _share_sync_load() -> dict[str, Any]:
 def _share_sync_save(
     enabled: bool,
     sensors: list[Any] | None = None,
+    categories: list[Any] | None = None,
 ) -> dict[str, Any]:
     from datetime import datetime, timezone
 
@@ -378,15 +398,38 @@ def _share_sync_save(
                 continue
             seen.add(eid)
             entries.append({"entity_id": eid, "system": system})
+    if categories is None:
+        cat_raw = current.get("categories") or []
+    else:
+        cat_raw = categories
+    cats: list[str] = []
+    cat_seen: set[str] = set()
+    for item in cat_raw if isinstance(cat_raw, list) else []:
+        slug = str(item or "").strip().lower().replace(" ", "-")
+        slug = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in slug)
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        slug = slug.strip("-")
+        if not slug or slug in cat_seen:
+            continue
+        cat_seen.add(slug)
+        cats.append(slug)
+    for row in entries:
+        slug = str(row.get("system") or "").strip()
+        if slug and slug not in cat_seen:
+            cat_seen.add(slug)
+            cats.append(slug)
+    cats.sort()
     body = {
         "v": 2,
         "limited_share_enabled": bool(enabled),
         "scope": ["status", "support_activity", "sensors"],
+        "categories": cats,
         "sensors": entries,
         "sensor_entities": [s["entity_id"] for s in entries],
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "note": (
-            "Box consent only. Client classifies each sensor (system/domain). "
+            "Box consent only. Client labels each sensor (domain or location). "
             "No company sees data until the homeowner grants them in BMS."
         ),
     }
@@ -440,10 +483,8 @@ class LimitedShareView(HomeAssistantView):
                 "available_sensors": _available_binary_sensors(hass),
                 "active_company_grants": grants,
                 "note": (
-                    "Select sensors and label each one yourself (domain or location, "
-                    "e.g. hvac, security, kitchen, front-door). Home Box never invents "
-                    "labels. Changing the list pushes an updated catalog to BMS. "
-                    "Companies only see data after you grant them in BMS. "
+                    "Create categories, select sensors, assign a category to each, then Save. "
+                    "Home Box never invents labels. Companies only see data after a BMS grant. "
                     "Switches/relays are never shared."
                 ),
             }
@@ -455,12 +496,20 @@ class LimitedShareView(HomeAssistantView):
         if user is None or not user.is_admin:
             return self.json({"ok": False, "error": "admin_required"}, status_code=403)
         data = await _json_body(request)
-        if "enabled" not in data and "sensors" not in data and "sensor_entities" not in data:
+        if (
+            "enabled" not in data
+            and "sensors" not in data
+            and "sensor_entities" not in data
+            and "categories" not in data
+        ):
             return self.json(
                 {
                     "ok": False,
                     "error": "invalid_input",
-                    "hint": 'JSON {"enabled": true|false, "sensors": [{"entity_id":"binary_sensor.…","system":"hvac|kitchen|…"}]}',
+                    "hint": (
+                        'JSON {"enabled": true|false, "categories": ["hvac","kitchen"], '
+                        '"sensors": [{"entity_id":"binary_sensor.…","system":"hvac"}]}'
+                    ),
                 },
                 status_code=400,
             )
@@ -478,10 +527,19 @@ class LimitedShareView(HomeAssistantView):
                 {"ok": False, "error": "invalid_input", "hint": "sensors must be a list"},
                 status_code=400,
             )
-        body = await hass.async_add_executor_job(_share_sync_save, enabled, sensors)
+        categories = data.get("categories") if "categories" in data else None
+        if categories is not None and not isinstance(categories, list):
+            return self.json(
+                {"ok": False, "error": "invalid_input", "hint": "categories must be a list"},
+                status_code=400,
+            )
+        body = await hass.async_add_executor_job(
+            _share_sync_save, enabled, sensors, categories
+        )
         _LOGGER.info(
-            "home_box_admin limited_share_enabled=%s sensors=%s",
+            "home_box_admin limited_share_enabled=%s sensors=%s categories=%s",
             enabled,
             len(body.get("sensors") or []),
+            len(body.get("categories") or []),
         )
         return self.json({"ok": True, **body})
