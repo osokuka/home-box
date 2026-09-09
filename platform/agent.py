@@ -5,7 +5,10 @@ GET subscription + POST heartbeat (+ appliance_uid).
 POST sensory status when:
   - box share allowlist / toggle changes (always push updated list), or
   - share is ON and the feed is positive
-Uses the same BMS_HA_TOKEN / secrets bms_ha_token as MCP and tuya-import (GET only).
+
+BMS auth = enroll token only. When sensory share is enabled, Home Box auto-creates
+a local HA long-lived read token (bms_ha_token in secrets) for friendly names and
+live states. Optional BMS_HA_TOKEN env still works as override.
 Never calls Home Assistant services. Never contacts device-vendor clouds.
 """
 
@@ -22,6 +25,7 @@ from bms_fetch import bms_request
 from bms_runtime import save_runtime_from_snapshot
 from bms_share import load_share
 from enroll_store import resolve_credentials
+from ha_local import load_local_states, merge_ha_states
 from ha_token import resolve_ha_token
 from sensor_feed import (
     collect_devices,
@@ -75,26 +79,6 @@ def ha_get(path: str, token: str):
         return None
 
 
-def climate_from_restore():
-    path = CONFIG / ".storage" / "core.restore_state"
-    if not path.is_file():
-        return None
-    try:
-        blob = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    data = blob.get("data") if isinstance(blob, dict) else None
-    if not isinstance(data, list):
-        return None
-    for row in data:
-        state = row.get("state") if isinstance(row, dict) else None
-        if not isinstance(state, dict):
-            continue
-        if state.get("entity_id") == CLIMATE_ENTITY:
-            return state
-    return None
-
-
 def loop() -> None:
     tick = 0
     last_share_sig = ""
@@ -106,6 +90,7 @@ def loop() -> None:
                 time.sleep(INTERVAL)
                 continue
 
+            # Optional: same token MCP/tuya use. Sensory feed does not require it.
             ha_token = resolve_ha_token()
             share = load_share()
             share_on = bool(share.get("limited_share_enabled"))
@@ -115,6 +100,11 @@ def loop() -> None:
             share_changed = sig != last_share_sig
             do_heartbeat = tick % HEARTBEAT_EVERY == 0
             tick += 1
+
+            local_states = load_local_states(CONFIG)
+            feed_detail = "local_ha_storage" if local_states else "no_ha_storage"
+            if ha_token:
+                feed_detail = "ha_api+local"
 
             snap: dict = {}
             fail = False
@@ -135,8 +125,8 @@ def loop() -> None:
                         },
                         {
                             "id": "sensory-feed",
-                            "status": "ok" if ha_token else "degraded",
-                            "detail": "ha_token_set" if ha_token else "ha_token_missing",
+                            "status": "ok" if local_states or ha_token else "degraded",
+                            "detail": feed_detail,
                         },
                         ha_row,
                     ],
@@ -161,7 +151,7 @@ def loop() -> None:
                     f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
                     f"fail_closed={fail} pwd_reset={reset_flag} "
                     f"limited_share={share_on} sensors={len(sensor_entries)} "
-                    f"ha_token={'set' if ha_token else 'missing'} platform={platform}",
+                    f"feed={feed_detail} platform={platform}",
                     flush=True,
                 )
 
@@ -169,11 +159,9 @@ def loop() -> None:
                 time.sleep(INTERVAL)
                 continue
 
-            states = ha_get("/api/states", ha_token)
-            state_list = states if isinstance(states, list) else None
-            if not state_list:
-                restored = climate_from_restore()
-                state_list = [restored] if restored else []
+            live = ha_get("/api/states", ha_token)
+            live_list = live if isinstance(live, list) else None
+            state_list = merge_ha_states(local_states, live_list)
 
             include_climate = not share_changed
             devices = collect_devices(
@@ -205,8 +193,6 @@ def loop() -> None:
                 continue
 
             activity = collect_support_activity(state_list) if share_on else []
-            # Keep ingest body on the known BMS contract (no extra experimental keys).
-            # Client classifications are per-sensor (domain or location) in device.system.
             body = {
                 "devices": devices,
                 "support_activity": activity,
@@ -215,7 +201,6 @@ def loop() -> None:
             try:
                 posted = api("POST", "/api/v1/ingest/status/", body)
             except Exception as batch_err:
-                # One bad classification must not block the rest — push individually.
                 if len(devices) <= 1:
                     raise batch_err
                 print(
@@ -238,7 +223,8 @@ def loop() -> None:
                         ok_n += int(one.get("count") or 1)
                         print(
                             f"feed device ok id={device.get('id')} "
-                            f"system={device.get('system')!r}",
+                            f"system={device.get('system')!r} "
+                            f"name={device.get('display_name')!r}",
                             flush=True,
                         )
                     except Exception as one_err:
@@ -268,12 +254,12 @@ def loop() -> None:
 
 if __name__ == "__main__":
     platform, token, uid = resolve_credentials()
-    ha_token = resolve_ha_token()
+    local_n = len(load_local_states(CONFIG))
     print(
         f"sensory-feed ingest {platform} uid={uid or 'unset'} "
         f"enroll_token={'set' if token else 'missing'} "
-        f"ha_token={'set' if ha_token else 'missing'} every {INTERVAL}s "
-        f"(push on share change or positive feed)",
+        f"local_ha_entities={local_n} every {INTERVAL}s "
+        f"(BMS enroll token only; HA names from /config storage)",
         flush=True,
     )
     loop()

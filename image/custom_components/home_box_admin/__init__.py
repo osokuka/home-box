@@ -30,6 +30,7 @@ SHARE_PATH = CONFIG / "bms_share.json"
 RUNTIME_PATH = CONFIG / "bms_runtime.json"
 SECRETS_PATH = CONFIG / "secrets.yaml"
 DEFAULT_BMS_PORTAL_URL = "https://bms.scardustech.com/portal"
+SENSORY_TOKEN_CLIENT_NAME = "Home Box sensory feed"
 
 
 def _bms_manage_url() -> str:
@@ -52,6 +53,81 @@ def _bms_manage_url() -> str:
         if match:
             return str(match.group(1) or "").strip().rstrip("/")
     return DEFAULT_BMS_PORTAL_URL
+
+
+def _read_bms_ha_token_from_secrets() -> str:
+    import re
+
+    if not SECRETS_PATH.is_file():
+        return ""
+    try:
+        text = SECRETS_PATH.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+    match = re.search(
+        r"(?m)^\s*bms_ha_token\s*:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
+        text,
+    )
+    return (match.group(1).strip() if match else "")
+
+
+def _upsert_bms_ha_token(token: str) -> None:
+    """Store/replace bms_ha_token in secrets.yaml (box-local; never returned to BMS)."""
+    import re
+
+    token = (token or "").strip()
+    if not token:
+        return
+    text = ""
+    if SECRETS_PATH.is_file():
+        try:
+            text = SECRETS_PATH.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+    line = f"bms_ha_token: {token}"
+    if re.search(r"(?m)^\s*bms_ha_token\s*:", text):
+        text = re.sub(r"(?m)^\s*bms_ha_token\s*:.*$", line, text, count=1)
+    else:
+        note = (
+            "\n# Auto-created when Allow sensory share to BMS was enabled "
+            "(read-only HA access for the sensory-feed agent).\n"
+        )
+        text = (text.rstrip() + note + line + "\n") if text.strip() else (line + "\n")
+    SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SECRETS_PATH.with_suffix(".tmp")
+    tmp.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    tmp.replace(SECRETS_PATH)
+
+
+async def _ensure_sensory_ha_token(hass: HomeAssistant, user) -> tuple[bool, str]:
+    """Ensure a long-lived HA token exists for sensory-feed when share is ON.
+
+    Returns (created_or_rotated, detail). Never returns the token value to callers
+    that might serialize it to the browser/BMS.
+    """
+    from datetime import timedelta
+
+    from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+
+    existing = await hass.async_add_executor_job(_read_bms_ha_token_from_secrets)
+    if existing:
+        refresh = await hass.auth.async_validate_access_token(existing)
+        if refresh is not None:
+            return False, "ha_token_present"
+
+    refresh_token = await hass.auth.async_create_refresh_token(
+        user,
+        client_name=SENSORY_TOKEN_CLIENT_NAME,
+        token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+        access_token_expiration=timedelta(days=3650),
+    )
+    access = hass.auth.async_create_access_token(refresh_token)
+    await hass.async_add_executor_job(_upsert_bms_ha_token, access)
+    _LOGGER.info(
+        "home_box_admin created long-lived HA token for sensory feed (user=%s)",
+        getattr(user, "name", None) or getattr(user, "id", "?"),
+    )
+    return True, "ha_token_created"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -503,6 +579,7 @@ class LimitedShareView(HomeAssistantView):
             runtime.get("household") if isinstance(runtime.get("household"), dict) else {}
         )
         manage_url = await hass.async_add_executor_job(_bms_manage_url)
+        ha_token = await hass.async_add_executor_job(_read_bms_ha_token_from_secrets)
         return self.json(
             {
                 "ok": True,
@@ -511,10 +588,11 @@ class LimitedShareView(HomeAssistantView):
                 "bms_manage_url": manage_url,
                 "household_name": household.get("name") or household.get("slug") or "",
                 "household_slug": household.get("slug") or "",
+                "ha_token_configured": bool(ha_token),
                 "note": (
                     "Create categories, select sensors, assign a category to each, then Save. "
-                    "Home Box never invents labels. Manage which companies see data in BMS. "
-                    "Switches/relays are never shared."
+                    "Enabling sensory share creates a local HA read token automatically. "
+                    "Manage which companies see data in BMS. Switches/relays are never shared."
                 ),
             }
         )
@@ -565,10 +643,35 @@ class LimitedShareView(HomeAssistantView):
         body = await hass.async_add_executor_job(
             _share_sync_save, enabled, sensors, categories
         )
+        token_detail = "ha_token_skipped"
+        if enabled:
+            try:
+                _created, token_detail = await _ensure_sensory_ha_token(hass, user)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.exception("home_box_admin failed to ensure sensory HA token")
+                return self.json(
+                    {
+                        "ok": False,
+                        "error": "ha_token_failed",
+                        "detail": str(exc)[:200],
+                        **body,
+                    },
+                    status_code=500,
+                )
         _LOGGER.info(
-            "home_box_admin limited_share_enabled=%s sensors=%s categories=%s",
+            "home_box_admin limited_share_enabled=%s sensors=%s categories=%s %s",
             enabled,
             len(body.get("sensors") or []),
             len(body.get("categories") or []),
+            token_detail,
         )
-        return self.json({"ok": True, **body})
+        return self.json(
+            {
+                "ok": True,
+                **body,
+                "ha_token_configured": bool(
+                    await hass.async_add_executor_job(_read_bms_ha_token_from_secrets)
+                ),
+                "ha_token_status": token_detail,
+            }
+        )

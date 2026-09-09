@@ -425,24 +425,23 @@ class HomeBoxCompanyAccess extends HTMLElement {
     this._busy = true;
     this.syncChrome();
     try {
-      await this.api("POST", "/api/home_box/limited_share", {
+      const data = await this.api("POST", "/api/home_box/limited_share", {
         enabled: this._shareOn,
         sensors,
         categories: this._categories,
       });
       this._savedSnapshot = this.snapshot();
       this._dirty = false;
-      this.setMsg(
-        "Saved. " +
-          sensors.length +
-          " sensor(s) will sync to BMS with your categories."
-      );
-      this.syncChrome();
+      const tokenNote =
+        data && data.ha_token_status === "ha_token_created"
+          ? " Local HA read token created for the sensory feed."
+          : "";
       await this.refresh();
       this.setMsg(
         "Saved. " +
           sensors.length +
-          " sensor(s) will sync to BMS with your categories."
+          " sensor(s) will sync to BMS with your categories." +
+          tokenNote
       );
     } catch (e) {
       this.setMsg(e.message || String(e), true);
@@ -678,7 +677,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
 
           <section class="section" aria-labelledby="share-heading">
             <h2 id="share-heading">1. Sensory share</h2>
-            <p class="muted">Master switch for this Home Box. Takes effect when you save.</p>
+            <p class="muted">Master switch for this Home Box. When you enable and save, Home Box creates a local read token so the sensory feed can use friendly names and live states — no separate setup.</p>
             <div class="row-toggle">
               <label for="shareToggle">Allow sensory share to BMS</label>
               <input type="checkbox" id="shareToggle" />

@@ -67,6 +67,7 @@ services:
     volumes:
       - ./platform/agent.py:/app/agent.py:ro
       - ./platform/sensor_feed.py:/app/sensor_feed.py:ro
+      - ./platform/ha_local.py:/app/ha_local.py:ro
       - ./platform/ha_token.py:/app/ha_token.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
       - ./platform/wg_store.py:/app/wg_store.py:ro
