@@ -3,7 +3,28 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKIP_LOGIN="${SKIP_DOCKER_LOGIN:-0}"
+
+if [ "${SKIP_LOGIN}" != "1" ]; then
+  bash "${SCRIPT_DIR}/docker-login.sh"
+fi
+
 USER_NAME="${DOCKERHUB_USER:-avniademi}"
+if [ -f "${SCRIPT_DIR}/docker-hub.env" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+    key="${line%%=*}"
+    val="${line#*=}"
+    key="$(echo "$key" | tr -d '[:space:]')"
+    if [ "$key" = "DOCKERHUB_USER" ] && [ -n "$val" ]; then
+      USER_NAME="$(echo "$val" | tr -d '[:space:]' | tr -d \"\' )"
+    fi
+  done < "${SCRIPT_DIR}/docker-hub.env"
+fi
+
 TAG="${HOME_BOX_TAG:-0.1.0}"
 LATEST="${PUSH_LATEST:-1}"
 

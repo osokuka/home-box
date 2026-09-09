@@ -32,13 +32,18 @@ The script writes a local `.env` (timezone, port, data dir, LAN SOCKS flag). **N
 
 ## Publish (maintainers)
 
+Credentials live in **gitignored** `scripts/docker-hub.env` (copy from `docker-hub.env.example`). Do not commit the PAT.
+
 ```powershell
-# must be logged in: docker login
+# scripts/docker-hub.env already loads on publish
+.\scripts\docker-login.ps1
 .\scripts\publish.ps1 -RegistryUser avniademi -Tag 0.1.0
 ```
 
 ```bash
-docker login
+cp scripts/docker-hub.env.example scripts/docker-hub.env   # once
+# edit DOCKERHUB_TOKEN=
+./scripts/docker-login.sh
 ./scripts/publish.sh
 ```
 

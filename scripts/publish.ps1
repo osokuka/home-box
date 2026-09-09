@@ -2,19 +2,38 @@
 param(
   [string]$RegistryUser = "avniademi",
   [string]$Tag = "0.1.0",
-  [switch]$Latest = $true
+  [switch]$Latest = $true,
+  [switch]$SkipLogin = $false
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
+if (-not $SkipLogin) {
+  & (Join-Path $PSScriptRoot "docker-login.ps1")
+  if ($env:DOCKERHUB_USER) { $RegistryUser = $env:DOCKERHUB_USER }
+  $envFile = Join-Path $PSScriptRoot "docker-hub.env"
+  if (Test-Path $envFile) {
+    Get-Content $envFile | ForEach-Object {
+      $line = $_.Trim()
+      if (-not $line -or $line.StartsWith("#")) { return }
+      $parts = $line.Split("=", 2)
+      if ($parts.Count -eq 2 -and $parts[0].Trim() -eq "DOCKERHUB_USER") {
+        $RegistryUser = $parts[1].Trim().Trim('"').Trim("'")
+      }
+    }
+  }
+}
+
 function Push-Tagged([string]$Name) {
   $full = "${RegistryUser}/${Name}:${Tag}"
   docker push $full
+  if ($LASTEXITCODE -ne 0) { throw "docker push failed: $full" }
   if ($Latest) {
     docker tag $full "${RegistryUser}/${Name}:latest"
     docker push "${RegistryUser}/${Name}:latest"
+    if ($LASTEXITCODE -ne 0) { throw "docker push failed: ${RegistryUser}/${Name}:latest" }
   }
 }
 
