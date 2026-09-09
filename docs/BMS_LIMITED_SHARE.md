@@ -31,6 +31,7 @@ Passwords / device commands are never part of this path.
 | API | `GET/POST /api/home_box/limited_share` (includes `bms_manage_url`) |
 | Agent | Heartbeat ~20s; feed check every **5s** (env `BMS_INTERVAL`) |
 | Agent | `POST /ingest/status/` on **share allowlist change** (full updated list, including off) and when share ON + feed positive |
+| Agent | `POST /ingest/location/` when share is **ON** (on share change + heartbeat), using HA home latitude/longitude + `location_name` as `label`, `source: "box"`. Same enroll bearer as heartbeat/status. Skipped if coords are missing. |
 
 ### `bms_share.json` shape
 
@@ -61,6 +62,7 @@ Owner enables sensory share + selects HLK DI sensors on Home Box
         │
         ▼
 Agent heartbeats limited_share_enabled=true
+Agent POSTs /ingest/location/ (HA home coords) on share change + heartbeats
 Agent polls feed every 5s
         │
    feed idle ──▶ no status POST
@@ -80,5 +82,6 @@ Company sees allowed sensory devices for granted domains
 
 - [ ] Persist `limited_share_enabled` from heartbeat
 - [ ] Accept `binary_input` devices with **free-form** `system` (domain or location)
+- [ ] Accept `POST /ingest/location/` with enroll bearer; store on household for company map when grant + share
 - [ ] Company status requires grant **and** box flag
 - [ ] No passwords / command APIs on this path

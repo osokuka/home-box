@@ -23,6 +23,7 @@ Sidecar talks only to the operator repo APIs:
 | GET | `/api/v1/ingest/subscription/` | Plan, slug, fail-closed |
 | POST | `/api/v1/ingest/heartbeat/` | Box alive + service statuses |
 | POST | `/api/v1/ingest/status/` | **Read-only** sensory snapshot (HVAC + selected binary sensors). Idle feeds are not posted. No commands |
+| POST | `/api/v1/ingest/location/` | Home lat/lon while sensory share is ON (HA home location; enroll bearer) |
 
 ### Auth and env
 

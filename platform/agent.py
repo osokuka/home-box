@@ -5,6 +5,7 @@ GET subscription + POST heartbeat (+ appliance_uid).
 POST sensory status when:
   - box share allowlist / toggle changes (always push updated list), or
   - share is ON and the feed is positive
+POST home location when share is ON (on share change + heartbeat ticks).
 
 BMS auth = enroll token only. When sensory share is enabled, Home Box auto-creates
 a local HA long-lived read token (bms_ha_token in secrets) for friendly names and
@@ -25,7 +26,7 @@ from bms_fetch import bms_request
 from bms_runtime import save_runtime_from_snapshot
 from bms_share import load_share
 from enroll_store import resolve_credentials
-from ha_local import load_local_states, merge_ha_states
+from ha_local import home_location_payload, load_local_states, merge_ha_states
 from ha_token import resolve_ha_token
 from sensor_feed import (
     collect_devices,
@@ -77,6 +78,29 @@ def ha_get(path: str, token: str):
             return json.loads(resp.read().decode())
     except Exception:
         return None
+
+
+def push_home_location(*, share_on: bool, share_changed: bool, do_heartbeat: bool, ha_token: str) -> None:
+    """POST /ingest/location/ while sensory share is on (enroll bearer via api())."""
+    if not share_on or not (share_changed or do_heartbeat):
+        return
+    api_cfg = ha_get("/api/config", ha_token)
+    payload = home_location_payload(
+        CONFIG, api_cfg if isinstance(api_cfg, dict) else None
+    )
+    if not payload:
+        print("location skip: no home coordinates on box", flush=True)
+        return
+    try:
+        posted = api("POST", "/api/v1/ingest/location/", payload)
+        house = posted.get("household_id") if isinstance(posted, dict) else None
+        print(
+            f"location push ok lat={payload['latitude']} lon={payload['longitude']} "
+            f"label={payload.get('label') or '-'} household={house or '-'}",
+            flush=True,
+        )
+    except Exception as err:
+        print(f"location push warn: {err}", flush=True)
 
 
 def loop() -> None:
@@ -158,6 +182,13 @@ def loop() -> None:
             if fail:
                 time.sleep(INTERVAL)
                 continue
+
+            push_home_location(
+                share_on=share_on,
+                share_changed=share_changed,
+                do_heartbeat=do_heartbeat,
+                ha_token=ha_token or "",
+            )
 
             live = ha_get("/api/states", ha_token)
             live_list = live if isinstance(live, list) else None

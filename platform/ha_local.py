@@ -124,3 +124,41 @@ def merge_ha_states(
         row["attributes"] = attrs
         by_id[eid] = row
     return list(by_id.values())
+
+
+def _coords_payload(data: dict[str, Any]) -> dict[str, Any] | None:
+    """Build BMS /ingest/location/ body from a HA config-like mapping."""
+    try:
+        lat = float(data.get("latitude"))
+        lon = float(data.get("longitude"))
+    except (TypeError, ValueError):
+        return None
+    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        return None
+    body: dict[str, Any] = {
+        "latitude": round(lat, 6),
+        "longitude": round(lon, 6),
+        "source": "box",
+    }
+    label = str(data.get("location_name") or "").strip()
+    if label:
+        body["label"] = label
+    return body
+
+
+def home_location_payload(
+    config: Path,
+    api_cfg: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Home fix for BMS map pin — HA API config preferred, else core.config."""
+    if isinstance(api_cfg, dict):
+        payload = _coords_payload(api_cfg)
+        if payload:
+            return payload
+    blob = _read_json(config / ".storage" / "core.config")
+    if not isinstance(blob, dict):
+        return None
+    data = blob.get("data") if isinstance(blob.get("data"), dict) else blob
+    if not isinstance(data, dict):
+        return None
+    return _coords_payload(data)
