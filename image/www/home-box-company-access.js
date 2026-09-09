@@ -153,7 +153,11 @@ class HomeBoxCompanyAccess extends HTMLElement {
       this._dirty = false;
       this.renderCategories();
       this.renderSensors();
-      this.renderGrants(data.active_company_grants || []);
+      this.renderGrants(
+        data.active_company_grants || [],
+        data.bms_manage_url || "",
+        data.household_name || ""
+      );
       const toggle = this.$("#shareToggle");
       if (toggle) toggle.checked = this._shareOn;
       this.setMsg("");
@@ -366,15 +370,31 @@ class HomeBoxCompanyAccess extends HTMLElement {
     });
   }
 
-  renderGrants(list) {
+  renderGrants(list, manageUrl, householdName) {
     const grants = this.$("#grantList");
     if (!grants) return;
+    const url = String(manageUrl || "").trim();
+    const title = householdName
+      ? "Open BMS for " + householdName
+      : "Open BMS to manage sharing";
+    const linkBlock = url
+      ? "<a class='bms-link' href='" +
+        this.escapeHtml(url) +
+        "' target='_blank' rel='noopener noreferrer'>" +
+        this.escapeHtml(title) +
+        "</a>" +
+        "<p class='muted'>Who sees your sensors is chosen in BMS — not on this box. " +
+        "Use the link above to add or revoke companies.</p>"
+      : "<p class='muted'>BMS portal URL is not configured on this box.</p>";
     if (!list.length) {
       grants.innerHTML =
-        "<p class='muted'>No company grants visible yet. After share is on, grant a company in BMS.</p>";
+        linkBlock +
+        "<p class='muted empty'>No active company grants yet. After sensory share is on, grant companies in BMS.</p>";
       return;
     }
     grants.innerHTML =
+      linkBlock +
+      "<p class='muted'>Currently visible to (read-only summary from BMS):</p>" +
       "<ul class='grants'>" +
       list
         .map(
@@ -618,8 +638,25 @@ class HomeBoxCompanyAccess extends HTMLElement {
           display: flex; flex-direction: column; gap: 0.25rem; margin: 0;
           font-size: 0.78rem; color: #2f6f4e; font-weight: 650;
         }
-        .grants { margin: 0; padding-left: 1.15rem; color: #14201a; }
+        .grants { margin: 0.35rem 0 0; padding-left: 1.15rem; color: #14201a; }
         .grants li { margin: 0.25rem 0; }
+        .bms-link {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          margin: 0.15rem 0 0.55rem;
+          padding: 0.65rem 0.9rem;
+          background: #2f6f4e;
+          color: #ffffff !important;
+          -webkit-text-fill-color: #ffffff;
+          font-weight: 650;
+          font-size: 0.98rem;
+          text-decoration: none;
+          border-radius: 6px;
+          border: 1px solid #255a3f;
+        }
+        .bms-link:hover { background: #255a3f; }
+        .bms-link::after { content: "↗"; font-size: 0.9em; opacity: 0.9; }
         .msg { min-height: 1.25rem; margin: 0.35rem 0 0.75rem; font-size: 0.9rem; color: #14201a; }
         .msg.ok-msg { color: #1e4d34; font-weight: 600; }
         .msg.err { color: #8b2e2e; font-weight: 600; }
@@ -699,7 +736,8 @@ class HomeBoxCompanyAccess extends HTMLElement {
           </section>
 
           <section class="section" aria-labelledby="grant-heading">
-            <h2 id="grant-heading">Company grants (from BMS)</h2>
+            <h2 id="grant-heading">Who can see this data</h2>
+            <p class="muted">Companies are granted access in BMS. This box only chooses which sensors leave.</p>
             <div id="grantList"><p class="muted">Loading…</p></div>
           </section>
 

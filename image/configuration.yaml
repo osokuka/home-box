@@ -63,5 +63,5 @@ panel_custom:
     sidebar_title: Company access
     sidebar_icon: mdi:account-hard-hat
     url_path: company-access
-    module_url: /local/home-box-company-access.js?v=20260909-center-contrast
+    module_url: /local/home-box-company-access.js?v=20260909-bms-link
     require_admin: true

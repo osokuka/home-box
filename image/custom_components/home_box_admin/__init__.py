@@ -28,6 +28,30 @@ CONFIG = Path("/config")
 ENROLL_PATH = CONFIG / "bms_enroll.json"
 SHARE_PATH = CONFIG / "bms_share.json"
 RUNTIME_PATH = CONFIG / "bms_runtime.json"
+SECRETS_PATH = CONFIG / "secrets.yaml"
+DEFAULT_BMS_PORTAL_URL = "https://bms.scardustech.com/portal"
+
+
+def _bms_manage_url() -> str:
+    """Public BMS URL where the homeowner manages company share grants."""
+    import os
+    import re
+
+    env = str(os.environ.get("BMS_PORTAL_URL") or "").strip().rstrip("/")
+    if env:
+        return env
+    if SECRETS_PATH.is_file():
+        try:
+            text = SECRETS_PATH.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+        match = re.search(
+            r"(?m)^\s*bms_portal_url\s*:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
+            text,
+        )
+        if match:
+            return str(match.group(1) or "").strip().rstrip("/")
+    return DEFAULT_BMS_PORTAL_URL
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -476,15 +500,22 @@ class LimitedShareView(HomeAssistantView):
         share = await hass.async_add_executor_job(_share_sync_load)
         runtime = await _read_json(hass, RUNTIME_PATH)
         grants = runtime.get("shares") if isinstance(runtime.get("shares"), list) else []
+        household = (
+            runtime.get("household") if isinstance(runtime.get("household"), dict) else {}
+        )
+        manage_url = await hass.async_add_executor_job(_bms_manage_url)
         return self.json(
             {
                 "ok": True,
                 **share,
                 "available_sensors": _available_binary_sensors(hass),
                 "active_company_grants": grants,
+                "bms_manage_url": manage_url,
+                "household_name": household.get("name") or household.get("slug") or "",
+                "household_slug": household.get("slug") or "",
                 "note": (
                     "Create categories, select sensors, assign a category to each, then Save. "
-                    "Home Box never invents labels. Companies only see data after a BMS grant. "
+                    "Home Box never invents labels. Manage which companies see data in BMS. "
                     "Switches/relays are never shared."
                 ),
             }

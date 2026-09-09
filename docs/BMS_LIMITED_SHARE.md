@@ -26,9 +26,9 @@ Passwords / device commands are never part of this path.
 
 | Piece | Detail |
 | --- | --- |
-| UI | Sidebar **Company access** → “Allow sensory share to BMS” + sensor checkboxes |
+| UI | Sidebar **Company access** → sensory share + categories + sensors; **Open BMS** link to manage company grants |
 | Storage | `/config/bms_share.json` |
-| API | `GET/POST /api/home_box/limited_share` |
+| API | `GET/POST /api/home_box/limited_share` (includes `bms_manage_url`) |
 | Agent | Heartbeat ~20s; feed check every **5s** (env `BMS_INTERVAL`) |
 | Agent | `POST /ingest/status/` on **share allowlist change** (full updated list, including off) and when share ON + feed positive |
 
