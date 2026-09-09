@@ -13,8 +13,21 @@ class HomeBoxCompanyAccess extends HTMLElement {
   _savedSnapshot = "";
 
   connectedCallback() {
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+    }
     this.render();
     this.refresh();
+  }
+
+  /** @param {string} sel */
+  $(sel) {
+    return (this.shadowRoot || this).querySelector(sel);
+  }
+
+  /** @param {string} sel */
+  $$(sel) {
+    return (this.shadowRoot || this).querySelectorAll(sel);
   }
 
   set hass(val) {
@@ -77,10 +90,10 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   syncChrome() {
-    const saveBtn = this.querySelector("#saveBtn");
-    const discardBtn = this.querySelector("#discardBtn");
-    const dirty = this.querySelector("#dirtyBadge");
-    const bar = this.querySelector("#saveBar");
+    const saveBtn = this.$("#saveBtn");
+    const discardBtn = this.$("#discardBtn");
+    const dirty = this.$("#dirtyBadge");
+    const bar = this.$("#saveBar");
     if (saveBtn) {
       saveBtn.disabled = this._busy || !this._dirty;
       saveBtn.textContent = this._busy ? "Saving…" : "Save changes";
@@ -91,7 +104,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       dirty.textContent = this._dirty ? "Unsaved changes" : "";
     }
     if (bar) bar.classList.toggle("active", this._dirty);
-    const status = this.querySelector("#shareStatus");
+    const status = this.$("#shareStatus");
     if (status && !status.classList.contains("err-load")) {
       status.textContent = this._shareOn
         ? "Sensory share is ON after you save. Selected sensors leave with the category you assign. Companies still need a BMS grant."
@@ -101,7 +114,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   async refresh() {
-    const status = this.querySelector("#shareStatus");
+    const status = this.$("#shareStatus");
     if (!status || !this._hass) return;
     try {
       const data = await this.api("GET", "/api/home_box/limited_share");
@@ -141,7 +154,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       this.renderCategories();
       this.renderSensors();
       this.renderGrants(data.active_company_grants || []);
-      const toggle = this.querySelector("#shareToggle");
+      const toggle = this.$("#shareToggle");
       if (toggle) toggle.checked = this._shareOn;
       this.setMsg("");
       this.syncChrome();
@@ -152,7 +165,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   renderCategories() {
-    const host = this.querySelector("#categoryList");
+    const host = this.$("#categoryList");
     if (!host) return;
     if (!this._categories.length) {
       host.innerHTML =
@@ -191,7 +204,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   addCategory() {
-    const input = this.querySelector("#newCategory");
+    const input = this.$("#newCategory");
     if (!input) return;
     const cat = this.slug(input.value);
     if (!cat) {
@@ -238,8 +251,8 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   renderSensors() {
-    const host = this.querySelector("#sensorList");
-    const countEl = this.querySelector("#selectedCount");
+    const host = this.$("#sensorList");
+    const countEl = this.$("#selectedCount");
     if (countEl) {
       countEl.textContent =
         this._selected.size +
@@ -254,7 +267,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       return;
     }
     const filter = String(
-      (this.querySelector("#sensorFilter") || {}).value || ""
+      (this.$("#sensorFilter") || {}).value || ""
     )
       .trim()
       .toLowerCase();
@@ -354,7 +367,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   renderGrants(list) {
-    const grants = this.querySelector("#grantList");
+    const grants = this.$("#grantList");
     if (!grants) return;
     if (!list.length) {
       grants.innerHTML =
@@ -390,7 +403,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   setMsg(text, isErr) {
-    const msg = this.querySelector("#shareMsg");
+    const msg = this.$("#shareMsg");
     if (!msg) return;
     msg.textContent = text || "";
     msg.className = "msg" + (isErr ? " err" : text ? " ok-msg" : "");
@@ -446,36 +459,50 @@ class HomeBoxCompanyAccess extends HTMLElement {
   }
 
   render() {
-    this.innerHTML = `
+    const root = this.shadowRoot || this;
+    root.innerHTML = `
       <style>
         :host {
           display: block;
-          padding: 1.25rem 1.25rem 5.5rem;
-          max-width: 42rem;
+          width: 100%;
+          max-width: 100%;
+          box-sizing: border-box;
+          color-scheme: light;
+          background: #e8efe9;
+          min-height: 100vh;
           font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
           line-height: 1.45;
           color: #14201a;
-          background:
-            radial-gradient(ellipse 80% 50% at 0% 0%, #d8ebe0 0%, transparent 55%),
-            linear-gradient(180deg, #f3f7f4 0%, #e8efe9 100%);
-          min-height: 100%;
-          box-sizing: border-box;
         }
-        * { box-sizing: border-box; }
-        h1 { font-size: 1.55rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; }
-        h2 { font-size: 1.05rem; margin: 0 0 0.4rem; font-weight: 650; }
+        *, *::before, *::after { box-sizing: border-box; }
+        .shell {
+          width: 100%;
+          min-height: 100vh;
+          background:
+            radial-gradient(ellipse 70% 45% at 50% 0%, #d8ebe0 0%, transparent 55%),
+            linear-gradient(180deg, #f3f7f4 0%, #e8efe9 100%);
+          padding: 1.5rem 1.25rem 6rem;
+        }
+        .page {
+          width: 100%;
+          max-width: 48rem;
+          margin: 0 auto;
+        }
+        h1 { font-size: 1.55rem; margin: 0 0 0.35rem; letter-spacing: -0.02em; color: #14201a; }
+        h2 { font-size: 1.05rem; margin: 0 0 0.4rem; font-weight: 650; color: #14201a; }
         h3 { font-size: 0.92rem; margin: 0 0 0.45rem; font-weight: 650; color: #2a3d33; }
         code, .eid {
           font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
           font-size: 0.78rem;
           background: #e2ebe5;
+          color: #14201a;
           padding: 0.12em 0.4em;
           border-radius: 3px;
           word-break: break-all;
         }
         .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 0.75rem; }
         .brand img { height: 36px; }
-        .lede { color: #4a5c52; font-size: 0.95rem; margin: 0 0 1.1rem; max-width: 36rem; }
+        .lede { color: #4a5c52; font-size: 0.95rem; margin: 0 0 1.1rem; }
         .banner {
           margin: 0 0 1rem;
           padding: 0.7rem 0.85rem;
@@ -488,9 +515,10 @@ class HomeBoxCompanyAccess extends HTMLElement {
         .section {
           margin: 0 0 1.15rem;
           padding: 1rem 1.05rem 1.1rem;
-          background: rgba(255,255,255,0.72);
+          background: #ffffff;
           border: 1px solid #c5d4cb;
           border-radius: 8px;
+          box-shadow: 0 1px 2px rgba(20, 40, 30, 0.04);
         }
         .section-head {
           display: flex; flex-wrap: wrap; align-items: baseline;
@@ -503,12 +531,45 @@ class HomeBoxCompanyAccess extends HTMLElement {
           padding: 0.65rem 0.75rem; background: #eef4f0; border-radius: 6px;
           border: 1px solid #c5d4cb;
         }
-        .row-toggle label { font-weight: 650; flex: 1; }
-        input[type=checkbox] { width: 1.2rem; height: 1.2rem; accent-color: #2f6f4e; }
+        .row-toggle label { font-weight: 650; flex: 1; color: #14201a; }
+        input[type=checkbox] {
+          width: 1.2rem; height: 1.2rem; accent-color: #2f6f4e; color-scheme: light;
+        }
         .cat-add { display: flex; gap: 0.45rem; margin-top: 0.65rem; flex-wrap: wrap; }
-        .cat-add input[type=text], .filter input[type=search], .classify select {
-          flex: 1; min-width: 10rem; padding: 0.45rem 0.55rem;
-          border: 1px solid #b7c7bd; border-radius: 5px; font: inherit; background: #fff;
+        input[type=text],
+        input[type=search],
+        select,
+        select option {
+          color: #14201a !important;
+          -webkit-text-fill-color: #14201a !important;
+          background-color: #ffffff !important;
+          color-scheme: light;
+        }
+        .cat-add input[type=text],
+        .filter input[type=search],
+        .classify select {
+          flex: 1;
+          min-width: 10rem;
+          width: 100%;
+          padding: 0.5rem 0.6rem;
+          border: 1px solid #8fad9a;
+          border-radius: 5px;
+          font: inherit;
+          font-size: 0.95rem;
+          line-height: 1.3;
+          background-color: #ffffff !important;
+          color: #14201a !important;
+          -webkit-text-fill-color: #14201a !important;
+        }
+        .classify select:disabled {
+          opacity: 0.55;
+          background-color: #eef2ef !important;
+          color: #2f6f4e !important;
+          -webkit-text-fill-color: #2f6f4e !important;
+        }
+        .classify select option {
+          background-color: #ffffff !important;
+          color: #14201a !important;
         }
         .btn {
           appearance: none; border: 1px solid #2f6f4e; background: #2f6f4e; color: #fff;
@@ -516,16 +577,16 @@ class HomeBoxCompanyAccess extends HTMLElement {
           cursor: pointer;
         }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-        .btn.secondary { background: #fff; color: #2a3d33; border-color: #b7c7bd; }
-        .btn.ghost { background: transparent; color: #2a3d33; border-color: transparent; }
+        .btn.secondary { background: #ffffff; color: #1e4d34; border-color: #8fad9a; }
         .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; min-height: 1.75rem; }
         .chip {
           display: inline-flex; align-items: center; gap: 0.25rem;
           padding: 0.2rem 0.25rem 0.2rem 0.55rem; background: #dceae2;
           border: 1px solid #a8c4b4; border-radius: 999px; font-size: 0.86rem; font-weight: 600;
+          color: #1e4d34;
         }
         .chip-x {
-          border: 0; background: transparent; color: #3d5a4a; cursor: pointer;
+          border: 0; background: transparent; color: #2f6f4e; cursor: pointer;
           font-size: 1.05rem; line-height: 1; padding: 0 0.35rem; border-radius: 999px;
         }
         .chip-x:hover { background: #c5ddd0; }
@@ -534,18 +595,18 @@ class HomeBoxCompanyAccess extends HTMLElement {
           margin-bottom: 0.65rem;
         }
         .filter { flex: 1; min-width: 12rem; }
-        .count { font-size: 0.86rem; color: #4a5c52; font-weight: 600; }
+        .count { font-size: 0.86rem; color: #2f6f4e; font-weight: 600; }
         #sensorList { display: flex; flex-direction: column; gap: 0.45rem; }
         .sensor {
-          display: grid; grid-template-columns: 1fr minmax(9rem, 11rem);
+          display: grid; grid-template-columns: 1fr minmax(10rem, 12rem);
           gap: 0.55rem 0.75rem; align-items: center;
           padding: 0.65rem 0.7rem; background: #f7faf8;
-          border: 1px solid #c5d4cb; border-radius: 6px; transition: border-color 0.15s, background 0.15s;
+          border: 1px solid #c5d4cb; border-radius: 6px;
         }
         .sensor.on { background: #eef6f1; border-color: #8fb89d; }
-        .check { display: flex; gap: 0.65rem; align-items: flex-start; margin: 0; }
+        .check { display: flex; gap: 0.65rem; align-items: flex-start; margin: 0; color: #14201a; }
         .meta { display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
-        .name { font-weight: 650; font-size: 0.95rem; }
+        .name { font-weight: 650; font-size: 0.95rem; color: #14201a; }
         .state {
           display: inline-block; width: fit-content; font-size: 0.75rem; font-weight: 650;
           text-transform: uppercase; letter-spacing: 0.03em;
@@ -553,107 +614,116 @@ class HomeBoxCompanyAccess extends HTMLElement {
         }
         .state[data-state="on"] { background: #cfe8d8; color: #1e4d34; }
         .state[data-state="off"] { background: #e4e8e5; color: #5c6b63; }
-        .classify { display: flex; flex-direction: column; gap: 0.2rem; margin: 0;
-          font-size: 0.78rem; color: #5c6b63; font-weight: 600; }
-        .classify select:disabled { opacity: 0.45; }
-        .grants { margin: 0; padding-left: 1.15rem; }
+        .classify {
+          display: flex; flex-direction: column; gap: 0.25rem; margin: 0;
+          font-size: 0.78rem; color: #2f6f4e; font-weight: 650;
+        }
+        .grants { margin: 0; padding-left: 1.15rem; color: #14201a; }
         .grants li { margin: 0.25rem 0; }
-        .msg { min-height: 1.25rem; margin: 0.35rem 0 0; font-size: 0.9rem; }
+        .msg { min-height: 1.25rem; margin: 0.35rem 0 0.75rem; font-size: 0.9rem; color: #14201a; }
         .msg.ok-msg { color: #1e4d34; font-weight: 600; }
         .msg.err { color: #8b2e2e; font-weight: 600; }
         #saveBar {
-          position: sticky; bottom: 0; left: 0; right: 0;
-          margin: 1.25rem -1.25rem -1.25rem; padding: 0.85rem 1.25rem;
+          position: sticky;
+          bottom: 0;
+          margin-top: 1rem;
+          padding: 0.85rem 1rem;
           display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: center;
-          background: #1a2e24; color: #e8f2ec; border-top: 1px solid #2f4a3c;
-          opacity: 0.92; transition: box-shadow 0.2s;
+          background: #1a2e24; color: #e8f2ec; border: 1px solid #2f4a3c;
+          border-radius: 8px;
         }
-        #saveBar.active { box-shadow: 0 -8px 24px rgba(20, 40, 30, 0.18); opacity: 1; }
-        #dirtyBadge {
-          flex: 1; font-size: 0.88rem; font-weight: 650; color: #f0d9a0;
+        #saveBar.active { box-shadow: 0 8px 24px rgba(20, 40, 30, 0.22); }
+        #dirtyBadge { flex: 1; font-size: 0.88rem; font-weight: 650; color: #f0d9a0; }
+        #saveBar .btn { border-color: #3d8f64; color: #fff; }
+        #saveBar .btn.secondary {
+          background: transparent; color: #e8f2ec; border-color: #5a7568;
+          -webkit-text-fill-color: #e8f2ec;
         }
-        #saveBar .btn { border-color: #3d8f64; }
-        #saveBar .btn.secondary { background: transparent; color: #e8f2ec; border-color: #5a7568; }
         @media (max-width: 560px) {
           .sensor { grid-template-columns: 1fr; }
+          .shell { padding: 1rem 0.85rem 5rem; }
         }
       </style>
 
-      <div class="brand">
-        <img src="/local/home-box-logo.svg" alt="Home Box" />
-      </div>
-      <h1>Company access</h1>
-      <p class="lede">
-        Choose which sensors leave this box, organize them into your own categories
-        (domain or location), then <strong>Save</strong>. Companies only see data after a BMS grant.
-        Relays and switches are never shared.
-      </p>
+      <div class="shell">
+        <div class="page">
+          <div class="brand">
+            <img src="/local/home-box-logo.svg" alt="Home Box" />
+          </div>
+          <h1>Company access</h1>
+          <p class="lede">
+            Choose which sensors leave this box, organize them into your own categories
+            (domain or location), then <strong>Save</strong>. Companies only see data after a BMS grant.
+            Relays and switches are never shared.
+          </p>
 
-      <p class="banner warn" id="shareStatus">Loading…</p>
+          <p class="banner warn" id="shareStatus">Loading…</p>
 
-      <section class="section" aria-labelledby="share-heading">
-        <h2 id="share-heading">1. Sensory share</h2>
-        <p class="muted">Master switch for this Home Box. Takes effect when you save.</p>
-        <div class="row-toggle">
-          <label for="shareToggle">Allow sensory share to BMS</label>
-          <input type="checkbox" id="shareToggle" />
-        </div>
-      </section>
+          <section class="section" aria-labelledby="share-heading">
+            <h2 id="share-heading">1. Sensory share</h2>
+            <p class="muted">Master switch for this Home Box. Takes effect when you save.</p>
+            <div class="row-toggle">
+              <label for="shareToggle">Allow sensory share to BMS</label>
+              <input type="checkbox" id="shareToggle" />
+            </div>
+          </section>
 
-      <section class="section" aria-labelledby="cat-heading">
-        <div class="section-head">
-          <h2 id="cat-heading">2. Categories</h2>
-        </div>
-        <p class="muted">
-          Create labels once, then assign them to sensors. Use domains
-          (<code>hvac</code>, <code>security</code>) or locations (<code>kitchen</code>, <code>front-door</code>).
-        </p>
-        <h3>Your categories</h3>
-        <div class="chips" id="categoryList"></div>
-        <div class="cat-add">
-          <input type="text" id="newCategory" placeholder="New category name" autocomplete="off" />
-          <button type="button" class="btn secondary" id="addCategoryBtn">Add category</button>
-        </div>
-      </section>
+          <section class="section" aria-labelledby="cat-heading">
+            <div class="section-head">
+              <h2 id="cat-heading">2. Categories</h2>
+            </div>
+            <p class="muted">
+              Create labels once, then assign them to sensors. Use domains
+              (<code>hvac</code>, <code>security</code>) or locations (<code>kitchen</code>, <code>front-door</code>).
+            </p>
+            <h3>Your categories</h3>
+            <div class="chips" id="categoryList"></div>
+            <div class="cat-add">
+              <input type="text" id="newCategory" placeholder="New category name" autocomplete="off" />
+              <button type="button" class="btn secondary" id="addCategoryBtn">Add category</button>
+            </div>
+          </section>
 
-      <section class="section" aria-labelledby="sensor-heading">
-        <div class="section-head">
-          <h2 id="sensor-heading">3. Sensors for share</h2>
-          <span class="count" id="selectedCount">—</span>
-        </div>
-        <p class="muted">Check sensors to include, then pick a category for each. Unchecked sensors stay on the box only.</p>
-        <div class="toolbar">
-          <div class="filter">
-            <input type="search" id="sensorFilter" placeholder="Filter by name or entity id" />
+          <section class="section" aria-labelledby="sensor-heading">
+            <div class="section-head">
+              <h2 id="sensor-heading">3. Sensors for share</h2>
+              <span class="count" id="selectedCount">—</span>
+            </div>
+            <p class="muted">Check sensors to include, then pick a category for each. Unchecked sensors stay on the box only.</p>
+            <div class="toolbar">
+              <div class="filter">
+                <input type="search" id="sensorFilter" placeholder="Filter by name or entity id" />
+              </div>
+            </div>
+            <div id="sensorList"><p class="muted">Loading…</p></div>
+          </section>
+
+          <section class="section" aria-labelledby="grant-heading">
+            <h2 id="grant-heading">Company grants (from BMS)</h2>
+            <div id="grantList"><p class="muted">Loading…</p></div>
+          </section>
+
+          <div class="msg" id="shareMsg" role="status"></div>
+
+          <div id="saveBar" aria-live="polite">
+            <span id="dirtyBadge" hidden></span>
+            <button type="button" class="btn secondary" id="discardBtn" disabled>Discard</button>
+            <button type="button" class="btn" id="saveBtn" disabled>Save changes</button>
           </div>
         </div>
-        <div id="sensorList"><p class="muted">Loading…</p></div>
-      </section>
-
-      <section class="section" aria-labelledby="grant-heading">
-        <h2 id="grant-heading">Company grants (from BMS)</h2>
-        <div id="grantList"><p class="muted">Loading…</p></div>
-      </section>
-
-      <div class="msg" id="shareMsg" role="status"></div>
-
-      <div id="saveBar" aria-live="polite">
-        <span id="dirtyBadge" hidden></span>
-        <button type="button" class="btn secondary" id="discardBtn" disabled>Discard</button>
-        <button type="button" class="btn" id="saveBtn" disabled>Save changes</button>
       </div>
     `;
 
-    const toggle = this.querySelector("#shareToggle");
+    const toggle = this.$("#shareToggle");
     if (toggle) {
       toggle.addEventListener("change", () => {
         this._shareOn = !!toggle.checked;
         this.markDirty();
       });
     }
-    const addBtn = this.querySelector("#addCategoryBtn");
+    const addBtn = this.$("#addCategoryBtn");
     if (addBtn) addBtn.addEventListener("click", () => this.addCategory());
-    const newCat = this.querySelector("#newCategory");
+    const newCat = this.$("#newCategory");
     if (newCat) {
       newCat.addEventListener("keydown", (ev) => {
         if (ev.key === "Enter") {
@@ -662,13 +732,13 @@ class HomeBoxCompanyAccess extends HTMLElement {
         }
       });
     }
-    const filter = this.querySelector("#sensorFilter");
+    const filter = this.$("#sensorFilter");
     if (filter) {
       filter.addEventListener("input", () => this.renderSensors());
     }
-    const saveBtn = this.querySelector("#saveBtn");
+    const saveBtn = this.$("#saveBtn");
     if (saveBtn) saveBtn.addEventListener("click", () => this.onSave());
-    const discardBtn = this.querySelector("#discardBtn");
+    const discardBtn = this.$("#discardBtn");
     if (discardBtn) discardBtn.addEventListener("click", () => this.onDiscard());
   }
 }
