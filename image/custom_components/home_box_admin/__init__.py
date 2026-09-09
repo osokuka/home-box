@@ -499,7 +499,6 @@ class LimitedShareView(HomeAssistantView):
             return self.json({"ok": False, "error": "admin_required"}, status_code=403)
         share = await hass.async_add_executor_job(_share_sync_load)
         runtime = await _read_json(hass, RUNTIME_PATH)
-        grants = runtime.get("shares") if isinstance(runtime.get("shares"), list) else []
         household = (
             runtime.get("household") if isinstance(runtime.get("household"), dict) else {}
         )
@@ -509,7 +508,6 @@ class LimitedShareView(HomeAssistantView):
                 "ok": True,
                 **share,
                 "available_sensors": _available_binary_sensors(hass),
-                "active_company_grants": grants,
                 "bms_manage_url": manage_url,
                 "household_name": household.get("name") or household.get("slug") or "",
                 "household_slug": household.get("slug") or "",

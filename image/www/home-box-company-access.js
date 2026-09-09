@@ -154,7 +154,6 @@ class HomeBoxCompanyAccess extends HTMLElement {
       this.renderCategories();
       this.renderSensors();
       this.renderGrants(
-        data.active_company_grants || [],
         data.bms_manage_url || "",
         data.household_name || ""
       );
@@ -370,45 +369,26 @@ class HomeBoxCompanyAccess extends HTMLElement {
     });
   }
 
-  renderGrants(list, manageUrl, householdName) {
+  renderGrants(manageUrl, householdName) {
     const grants = this.$("#grantList");
     if (!grants) return;
     const url = String(manageUrl || "").trim();
     const title = householdName
       ? "Open BMS for " + householdName
       : "Open BMS to manage sharing";
-    const linkBlock = url
-      ? "<a class='bms-link' href='" +
-        this.escapeHtml(url) +
-        "' target='_blank' rel='noopener noreferrer'>" +
-        this.escapeHtml(title) +
-        "</a>" +
-        "<p class='muted'>Who sees your sensors is chosen in BMS — not on this box. " +
-        "Use the link above to add or revoke companies.</p>"
-      : "<p class='muted'>BMS portal URL is not configured on this box.</p>";
-    if (!list.length) {
+    if (!url) {
       grants.innerHTML =
-        linkBlock +
-        "<p class='muted empty'>No active company grants yet. After sensory share is on, grant companies in BMS.</p>";
+        "<p class='muted'>BMS portal URL is not configured on this box.</p>";
       return;
     }
     grants.innerHTML =
-      linkBlock +
-      "<p class='muted'>Currently visible to (read-only summary from BMS):</p>" +
-      "<ul class='grants'>" +
-      list
-        .map(
-          (g) =>
-            "<li><strong>" +
-            this.escapeHtml(
-              g.company_name || g.company_slug || g.company_id || "company"
-            ) +
-            "</strong> — domains: " +
-            this.escapeHtml((g.domains || []).join(", ") || "—") +
-            "</li>"
-        )
-        .join("") +
-      "</ul>";
+      "<a class='bms-link' href='" +
+      this.escapeHtml(url) +
+      "' target='_blank' rel='noopener noreferrer'>" +
+      this.escapeHtml(title) +
+      "</a>" +
+      "<p class='muted'>Who sees your sensors is chosen in BMS — not on this box. " +
+      "Use the link above to add or revoke companies.</p>";
   }
 
   draftSensors() {
