@@ -80,7 +80,7 @@ Example entity IDs on this lab box:
 | `0x06` | Read 16 outputs (2 packed bytes) |
 | `0x01` | Output control (channel mask + on/off) |
 
-Polling defaults to ~500 ms for both DI and DO. Connection is persistent TCP with reconnect on failure; entities go unavailable while disconnected.
+Polling defaults to ~500 ms for both DI and DO while healthy. Connection is persistent TCP: on failure the client disconnects, backs off (1s → 30s), and force-resets the socket every few failures so entities recover when the LAN/SOCKS path returns without a manual reload.
 
 ## Source layout
 
@@ -102,6 +102,7 @@ Protocol framing was cross-checked against the MIT-licensed [jameshilliard/hlk-d
 | Symptom | Check |
 | --- | --- |
 | Config flow / smoke: timeout from container | SOCKS script running? `lan-router` up? `ENABLE_LAN_SOCKS=1`? |
+| Host ping works, HA shows device unavailable | Start `tuya/socks5-windows.ps1` (required after every Windows reboot). Integration self-heals once SOCKS is back; wait up to ~30s or reload HLK if stuck |
 | Host ping works, HA does not | Docker Desktop LAN path — SOCKS required on Windows lab |
 | Smoke test fails while integration is loaded | Device allows **one TCP client**; unload/disable the integration first, or trust HA’s connection |
 | Wrong device after DHCP change | Re-scan TCP `8080`, update the integration host, or re-add |

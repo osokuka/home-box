@@ -73,7 +73,7 @@ class HlkDio16Client:
         _LOGGER.info("Connected to HLK-DIO16 at %s:%s", self.host, self.port)
 
     async def disconnect(self) -> None:
-        """Close the TCP connection."""
+        """Close the TCP connection. Never raises (safe from except handlers)."""
         writer = self._writer
         self._reader = None
         self._writer = None
@@ -83,7 +83,7 @@ class HlkDio16Client:
         try:
             writer.close()
             await writer.wait_closed()
-        except OSError:
+        except Exception:  # noqa: BLE001 — cleanup must not mask the caller error
             pass
         _LOGGER.info("Disconnected from HLK-DIO16 at %s:%s", self.host, self.port)
 
