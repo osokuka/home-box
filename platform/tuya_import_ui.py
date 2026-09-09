@@ -20,6 +20,7 @@ from tuya_csv import (
 )
 
 PORT = int(os.environ.get("BMS_TUYA_IMPORT_PORT", "8098"))
+APP_BASE = os.environ.get("PUBLIC_BASE_PATH", "").rstrip("/")
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
 QUEUE_PATH = Path(os.environ.get("BMS_TUYA_IMPORT_QUEUE", str(CONFIG / "tuya_import_queue.json")))
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
@@ -92,6 +93,8 @@ PAGE = """<!DOCTYPE html>
     </section>
   </main>
   <script>
+    const APP_BASE = "__APP_BASE__";
+    const u = (p) => APP_BASE + p;
     let devices = [];
     const msg = document.getElementById("msg");
     const tableWrap = document.getElementById("tableWrap");
@@ -129,7 +132,7 @@ PAGE = """<!DOCTYPE html>
     }
 
     async function refresh() {
-      const r = await fetch("/api/queue");
+      const r = await fetch(u("/api/queue"));
       const j = await r.json();
       render(j.devices || []);
       document.getElementById("tokenHint").textContent = j.ha_token_configured
@@ -144,7 +147,7 @@ PAGE = """<!DOCTYPE html>
       const name = (f.name || "").toLowerCase();
       if (name.endsWith(".xlsx")) {
         const b64 = arrayBufferToBase64(await f.arrayBuffer());
-        const r = await fetch("/api/parse", {
+        const r = await fetch(u("/api/parse"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ xlsx_base64: b64, filename: f.name }),
@@ -162,7 +165,7 @@ PAGE = """<!DOCTYPE html>
 
     document.getElementById("parse").onclick = async () => {
       setMsg("");
-      const r = await fetch("/api/parse", {
+      const r = await fetch(u("/api/parse"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csv: rawEl.value }),
@@ -175,7 +178,7 @@ PAGE = """<!DOCTYPE html>
 
     document.getElementById("save").onclick = async () => {
       setMsg("");
-      const r = await fetch("/api/queue", {
+      const r = await fetch(u("/api/queue"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csv: rawEl.value }),
@@ -188,7 +191,7 @@ PAGE = """<!DOCTYPE html>
 
     document.getElementById("apply").onclick = async () => {
       setMsg("Applying…");
-      const r = await fetch("/api/apply", {
+      const r = await fetch(u("/api/apply"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ csv: rawEl.value || null }),
@@ -201,7 +204,7 @@ PAGE = """<!DOCTYPE html>
     };
 
     document.getElementById("clear").onclick = async () => {
-      await fetch("/api/queue", { method: "DELETE" });
+      await fetch(u("/api/queue"), { method: "DELETE" });
       rawEl.value = "";
       render([]);
       setMsg("Cleared.");
@@ -211,7 +214,7 @@ PAGE = """<!DOCTYPE html>
   </script>
 </body>
 </html>
-"""
+""".replace("__APP_BASE__", APP_BASE)
 
 
 def _parse_body(body: dict) -> tuple[list[dict], list[str], str]:

@@ -17,11 +17,26 @@ services:
       - ./image/themes:/config/themes:ro
       # Product: Tuya Local from image (not Core cloud tuya).
       - ./image/custom_components:/config/custom_components:ro
-    # HTTP published for lab. WireGuard remote access is later.
-    ports:
-      - "8123:8123"
+    # No host ports — only gateway publishes :8123
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - ha
+
+  # Sole host entrypoint: path-routes to HA / enroll / import / MCP.
+  gateway:
+    image: nginx:1.27-alpine
+    container_name: home-box-gateway
+    restart: unless-stopped
+    ports:
+      - "${HOME_BOX_HTTP_PORT:-8123}:8123"
+    volumes:
+      - ./nginx/home-box.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - homeassistant
+      - enroll-ui
+      - tuya-import
+      - home-box-mcp
     networks:
       - ha
 
@@ -87,9 +102,8 @@ services:
       # Lab/tech only. Default off — enrolled boxes cannot be cleared via the UI/API.
       ENROLL_ALLOW_RESET: ${ENROLL_ALLOW_RESET:-0}
       HOME_BOX_OPEN_URL: ${HOME_BOX_OPEN_URL:-http://127.0.0.1:8123}
-    ports:
-      # LAN reachable for first-run phone QR scan; after enroll the QR page is locked server-side.
-      - "8099:8099"
+      PUBLIC_BASE_PATH: /enroll
+    # No host ports — use http://<box>:8123/enroll/
     volumes:
       - ./platform/enroll_ui.py:/app/enroll_ui.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
@@ -123,8 +137,7 @@ services:
     volumes:
       - ./config/wireguard:/config
       - /lib/modules:/lib/modules:ro
-    ports:
-      - "51820:51820/udp"
+    # Client mode dials out to the hub — no host UDP publish.
     networks:
       - ha
 
@@ -160,8 +173,8 @@ services:
       BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
       BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
       HA_CONFIG: /config
-    ports:
-      - "8098:8098"
+      PUBLIC_BASE_PATH: /import
+    # No host ports — use http://<box>:8123/import/
     volumes:
       - ./platform/tuya_import_ui.py:/app/tuya_import_ui.py:ro
       - ./platform/tuya_csv.py:/app/tuya_csv.py:ro
@@ -192,8 +205,7 @@ services:
       # Set to 0 for status-only (no call_service / turn_*)
       HOME_BOX_MCP_ALLOW_CONTROL: ${HOME_BOX_MCP_ALLOW_CONTROL:-1}
       HA_CONFIG: /config
-    ports:
-      - "8100:8100"
+    # No host ports — use http://<box>:8123/mcp/sse
     volumes:
       - ./platform/mcp_server.py:/app/mcp_server.py:ro
       - ./platform/ha_readonly.py:/app/ha_readonly.py:ro

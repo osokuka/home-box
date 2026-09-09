@@ -1,6 +1,6 @@
 """Home Box MCP — dynamic status + device control for OpenClaw.
 
-SSE: http://<box>:8100/sse
+SSE: http://<box>:8123/mcp/sse (via home-box gateway)
 Catalogs and control points are discovered live from each HA instance.
 Control requires HOME_BOX_MCP_ALLOW_CONTROL=1 and BMS_HA_TOKEN.
 """

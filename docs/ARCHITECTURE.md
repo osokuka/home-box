@@ -22,7 +22,8 @@
 
 | Service | Image / build | Job |
 | --- | --- | --- |
-| `homeassistant` | `home-box:local` from `image/Dockerfile` | HA Core + baked Python deps |
+| `homeassistant` | `home-box:local` from `image/Dockerfile` | HA Core + baked Python deps (internal :8123) |
+| `gateway` | `nginx:1.27-alpine` | **Sole host port** (`8123`) → path-routes to HA / enroll / import / MCP |
 | `platform-agent` | `python:3.12-alpine` + `platform/agent.py` | Enroll, heartbeat, **sensory feed** status POST |
 | `lan-router` | shares HA netns | Privacy iptables; optional SOCKS for Docker Desktop lab |
 
@@ -57,7 +58,7 @@ ha/
 
 | Phase | How clients open HA |
 | --- | --- |
-| **Now** | Host TCP 8123; BMS nginx proxies `{slug}.ha.localhost:8080`; WireGuard edge `{slug}.scardustech.com` via default stack |
+| **Now** | Host TCP **8123 only** (nginx gateway); BMS nginx may still proxy `{slug}.ha.localhost:8080`; WireGuard edge `{slug}.scardustech.com` via overlay `:8123` |
 | **Later** | Hardened production TLS / relay policies as needed |
 
 Trusted proxies in HA HTTP config cover Docker/BMS nginx ranges only (not `0.0.0.0/0`).
