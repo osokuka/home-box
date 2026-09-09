@@ -1,8 +1,9 @@
-"""Talk to the BMS platform from this box.
+"""Talk to the BMS platform from this box (sensory feed agent).
 
 Loads enroll from /config/bms_enroll.json (first-run UI) or env fallback.
 GET subscription + POST heartbeat (+ appliance_uid).
-POST device status + support activity only when limited share is enabled on the box.
+POST sensory status only when limited share is ON and the feed is positive.
+Checks the feed every BMS_INTERVAL seconds (default 5). Idle/empty → no status POST.
 Never calls Home Assistant services (no turn_on / set_hvac_mode).
 Never contacts device-vendor clouds. Outbound should be LAN/VPN only.
 """
@@ -11,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 import urllib.error
 import urllib.request
@@ -21,11 +21,14 @@ from bms_fetch import bms_request
 from bms_runtime import save_runtime_from_snapshot
 from bms_share import limited_share_enabled, load_share
 from enroll_store import resolve_credentials
+from sensor_feed import collect_devices, collect_support_activity, feed_is_positive
 
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
 HA_TOKEN = os.environ.get("BMS_HA_TOKEN", "").strip()
-INTERVAL = int(os.environ.get("BMS_INTERVAL", "20"))
-VERSION = os.environ.get("BMS_AGENT_VERSION", "home-box-0.1")
+INTERVAL = int(os.environ.get("BMS_INTERVAL", "5"))
+# Heartbeat less often than feed checks (default: every 4 ticks ≈ 20s when interval=5).
+HEARTBEAT_EVERY = max(1, int(os.environ.get("BMS_HEARTBEAT_EVERY", "4")))
+VERSION = os.environ.get("BMS_AGENT_VERSION", "home-box-feed-0.1")
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
 CLIMATE_ENTITY = os.environ.get("BMS_CLIMATE_ENTITY", "climate.heat_pump")
 
@@ -67,18 +70,14 @@ def ha_get(path: str):
         return None
 
 
-def read_json_storage(name: str):
-    path = CONFIG / ".storage" / name
+def climate_from_restore():
+    path = CONFIG / ".storage" / "core.restore_state"
     if not path.is_file():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        blob = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
-
-
-def climate_from_restore():
-    blob = read_json_storage("core.restore_state")
     data = blob.get("data") if isinstance(blob, dict) else None
     if not isinstance(data, list):
         return None
@@ -91,104 +90,8 @@ def climate_from_restore():
     return None
 
 
-def slug_key(name: str, fallback: str) -> str:
-    text = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
-    return text or fallback
-
-
-def map_climate(state: dict) -> dict:
-    attrs = state.get("attributes") if isinstance(state.get("attributes"), dict) else {}
-    ha_state = str(state.get("state") or "unknown")
-    if ha_state in ("unavailable", "unknown", ""):
-        health = "offline" if ha_state == "unavailable" else "unknown"
-        mode = "unknown"
-    else:
-        health = "online"
-        mode = ha_state
-    telemetry = {"hvac.mode": mode}
-    temp = attrs.get("current_temperature")
-    setpoint = attrs.get("temperature")
-    if temp is not None:
-        telemetry["hvac.temperature"] = temp
-    if setpoint is not None:
-        telemetry["hvac.setpoint_heat"] = setpoint
-    action = attrs.get("hvac_action")
-    if action:
-        telemetry["hvac.action"] = action
-    title = attrs.get("friendly_name") or "Heat pump"
-    return {
-        "id": slug_key(title, "heat-pump"),
-        "class": "heat_pump",
-        "system": "hvac",
-        "display_name": title,
-        "health": health,
-        "telemetry": telemetry,
-    }
-
-
-def collect_devices() -> list[dict]:
-    devices = []
-    states = ha_get("/api/states")
-    if isinstance(states, list):
-        for st in states:
-            if not isinstance(st, dict):
-                continue
-            eid = str(st.get("entity_id") or "")
-            if eid.startswith("climate."):
-                devices.append(map_climate(st))
-    if not devices:
-        restored = climate_from_restore()
-        if restored:
-            devices.append(map_climate(restored))
-        else:
-            devices.append(
-                {
-                    "id": "heat-pump",
-                    "class": "heat_pump",
-                    "system": "hvac",
-                    "display_name": "Heat pump",
-                    "health": "unknown",
-                    "telemetry": {},
-                }
-            )
-    return devices
-
-
-def collect_support_activity(states: list | None = None) -> list[dict]:
-    """Limited troubleshooting signals (faults / offline) — not full logs."""
-    if states is None:
-        raw = ha_get("/api/states")
-        states = raw if isinstance(raw, list) else []
-    events: list[dict] = []
-    for st in states:
-        if not isinstance(st, dict):
-            continue
-        eid = str(st.get("entity_id") or "")
-        attrs = st.get("attributes") if isinstance(st.get("attributes"), dict) else {}
-        state = str(st.get("state") or "")
-        name = str(attrs.get("friendly_name") or eid)
-        if "fault" in eid or "fault" in name.lower():
-            events.append(
-                {
-                    "type": "fault_signal",
-                    "entity_id": eid,
-                    "state": state,
-                    "name": name,
-                }
-            )
-        elif eid.startswith("climate.") and state in ("unavailable", "unknown"):
-            events.append(
-                {
-                    "type": "device_unreachable",
-                    "entity_id": eid,
-                    "state": state,
-                    "name": name,
-                }
-            )
-    return events[:50]
-
-
-def loop():
+def loop() -> None:
+    tick = 0
     while True:
         try:
             platform, token, uid = resolve_credentials()
@@ -196,73 +99,111 @@ def loop():
                 print("waiting: no enroll token (open enroll UI on :8099)", flush=True)
                 time.sleep(INTERVAL)
                 continue
+
             share = load_share()
             share_on = bool(share.get("limited_share_enabled"))
-            snap = api("GET", "/api/v1/ingest/subscription/")
-            fail = bool(snap.get("fail_closed"))
-            ha_row = ha_service_row()
-            hb_body = {
-                "version": VERSION,
-                "services": [
-                    {
-                        "id": "home-box",
-                        "status": "ok" if ha_row.get("status") == "ok" else ha_row.get("status") or "degraded",
-                        "detail": "appliance",
-                    },
-                    {"id": "platform-agent", "status": "ok"},
-                    ha_row,
-                ],
-                "limited_share_enabled": share_on,
-                "limited_share_scope": share.get("scope") or ["status", "support_activity"],
-            }
-            if uid:
-                hb_body["appliance_uid"] = uid
-            hb = api("POST", "/api/v1/ingest/heartbeat/", hb_body)
-            try:
-                save_runtime_from_snapshot(hb if isinstance(hb, dict) else snap)
-            except Exception as cache_err:
-                print(f"runtime cache warn: {cache_err}", flush=True)
-            house = (hb.get("household") or {}).get("slug")
-            reset_flag = bool(
-                ((hb.get("machine") or {}) if isinstance(hb, dict) else {}).get(
-                    "allow_password_reset"
+            sensor_entities = list(share.get("sensor_entities") or [])
+            do_heartbeat = tick % HEARTBEAT_EVERY == 0
+            tick += 1
+
+            snap: dict = {}
+            if do_heartbeat:
+                snap = api("GET", "/api/v1/ingest/subscription/")
+                fail = bool(snap.get("fail_closed"))
+                ha_row = ha_service_row()
+                scope = share.get("scope") or ["status", "support_activity", "sensors"]
+                hb_body = {
+                    "version": VERSION,
+                    "services": [
+                        {
+                            "id": "home-box",
+                            "status": "ok"
+                            if ha_row.get("status") == "ok"
+                            else ha_row.get("status") or "degraded",
+                            "detail": "appliance",
+                        },
+                        {"id": "sensory-feed", "status": "ok"},
+                        ha_row,
+                    ],
+                    "limited_share_enabled": share_on,
+                    "limited_share_scope": scope,
+                }
+                if uid:
+                    hb_body["appliance_uid"] = uid
+                hb = api("POST", "/api/v1/ingest/heartbeat/", hb_body)
+                try:
+                    save_runtime_from_snapshot(hb if isinstance(hb, dict) else snap)
+                except Exception as cache_err:
+                    print(f"runtime cache warn: {cache_err}", flush=True)
+                house = (hb.get("household") or {}).get("slug")
+                reset_flag = bool(
+                    ((hb.get("machine") or {}) if isinstance(hb, dict) else {}).get(
+                        "allow_password_reset"
+                    )
                 )
-            )
-            print(
-                f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
-                f"fail_closed={fail} pwd_reset={reset_flag} "
-                f"limited_share={share_on} platform={platform}",
-                flush=True,
-            )
+                print(
+                    f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
+                    f"fail_closed={fail} pwd_reset={reset_flag} "
+                    f"limited_share={share_on} platform={platform}",
+                    flush=True,
+                )
+                if fail:
+                    time.sleep(INTERVAL)
+                    continue
+            else:
+                fail = False
+
             if fail:
                 time.sleep(INTERVAL)
                 continue
+
             if not share_on:
+                if do_heartbeat:
+                    print(
+                        "limited share OFF — sensory feed not posted "
+                        "(enable under Company access on Home Box)",
+                        flush=True,
+                    )
+                time.sleep(INTERVAL)
+                continue
+
+            states = ha_get("/api/states")
+            state_list = states if isinstance(states, list) else None
+            if not state_list:
+                restored = climate_from_restore()
+                state_list = [restored] if restored else []
+
+            devices = collect_devices(
+                state_list,
+                climate_entity=CLIMATE_ENTITY,
+                sensor_entities=sensor_entities,
+                include_climate=True,
+            )
+            if not feed_is_positive(devices):
                 print(
-                    "limited share OFF — status/support not posted "
-                    "(enable under Company access on Home Box)",
+                    f"feed idle — not posting "
+                    f"(devices={len(devices)} sensors={len(sensor_entities)})",
                     flush=True,
                 )
-            else:
-                states = ha_get("/api/states")
-                devices = collect_devices()
-                activity = collect_support_activity(
-                    states if isinstance(states, list) else None
-                )
-                posted = api(
-                    "POST",
-                    "/api/v1/ingest/status/",
-                    {
-                        "devices": devices,
-                        "support_activity": activity,
-                        "limited_share": True,
-                    },
-                )
-                print(
-                    f"status limited-share count={posted.get('count')} "
-                    f"activity={len(activity)}",
-                    flush=True,
-                )
+                time.sleep(INTERVAL)
+                continue
+
+            activity = collect_support_activity(state_list)
+            posted = api(
+                "POST",
+                "/api/v1/ingest/status/",
+                {
+                    "devices": devices,
+                    "support_activity": activity,
+                    "limited_share": True,
+                    "feed": "sensory",
+                },
+            )
+            print(
+                f"feed positive count={posted.get('count')} "
+                f"devices={len(devices)} activity={len(activity)}",
+                flush=True,
+            )
         except urllib.error.HTTPError as err:
             body = err.read().decode(errors="replace")
             print("error", {"http": err.code, "body": body[:300]}, flush=True)
@@ -274,9 +215,9 @@ def loop():
 if __name__ == "__main__":
     platform, token, uid = resolve_credentials()
     print(
-        f"platform-agent ingest {platform} uid={uid or 'unset'} "
+        f"sensory-feed ingest {platform} uid={uid or 'unset'} "
         f"token={'set' if token else 'missing'} every {INTERVAL}s "
-        f"(status gated by limited share)",
+        f"(status only when share ON and feed positive)",
         flush=True,
     )
     loop()

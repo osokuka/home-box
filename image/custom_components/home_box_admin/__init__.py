@@ -26,8 +26,8 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "home_box_admin"
 CONFIG = Path("/config")
 ENROLL_PATH = CONFIG / "bms_enroll.json"
-RUNTIME_PATH = CONFIG / "bms_runtime.json"
 SHARE_PATH = CONFIG / "bms_share.json"
+RUNTIME_PATH = CONFIG / "bms_runtime.json"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -325,24 +325,44 @@ class PasswordResetView(HomeAssistantView):
 
 def _share_sync_load() -> dict[str, Any]:
     data = _read_json_sync(SHARE_PATH)
+    sensors: list[str] = []
+    raw = data.get("sensor_entities")
+    if isinstance(raw, list):
+        for item in raw:
+            eid = str(item or "").strip().lower()
+            if eid.startswith("binary_sensor.") and eid not in sensors:
+                sensors.append(eid)
     return {
         "limited_share_enabled": bool(data.get("limited_share_enabled")),
-        "scope": list(data.get("scope") or ["status", "support_activity"]),
+        "scope": list(data.get("scope") or ["status", "support_activity", "sensors"]),
+        "sensor_entities": sensors,
         "updated_at": data.get("updated_at"),
     }
 
 
-def _share_sync_save(enabled: bool) -> dict[str, Any]:
+def _share_sync_save(
+    enabled: bool, sensor_entities: list[str] | None = None
+) -> dict[str, Any]:
     from datetime import datetime, timezone
 
+    current = _share_sync_load()
+    if sensor_entities is None:
+        sensors = list(current.get("sensor_entities") or [])
+    else:
+        sensors = []
+        for item in sensor_entities:
+            eid = str(item or "").strip().lower()
+            if eid.startswith("binary_sensor.") and eid not in sensors:
+                sensors.append(eid)
     body = {
         "v": 1,
         "limited_share_enabled": bool(enabled),
-        "scope": ["status", "support_activity"],
+        "scope": ["status", "support_activity", "sensors"],
+        "sensor_entities": sensors,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "note": (
-            "Box consent only. No company sees data until the homeowner "
-            "grants a limited share to that company in BMS."
+            "Box consent only. Selects which sensory entities may leave toward BMS. "
+            "No company sees data until the homeowner grants them in BMS."
         ),
     }
     SHARE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -352,10 +372,28 @@ def _share_sync_save(enabled: bool) -> dict[str, Any]:
     return body
 
 
+def _available_binary_sensors(hass: HomeAssistant) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for state in hass.states.async_all("binary_sensor"):
+        eid = state.entity_id
+        attrs = state.attributes or {}
+        rows.append(
+            {
+                "entity_id": eid,
+                "name": attrs.get("friendly_name") or eid,
+                "state": state.state,
+                "device_class": attrs.get("device_class"),
+            }
+        )
+    rows.sort(key=lambda r: str(r.get("entity_id") or ""))
+    return rows
+
+
 class LimitedShareView(HomeAssistantView):
-    """Owner toggle for limited share consent (status + support activity).
+    """Owner toggle for limited sensory share (status + selected binary sensors).
 
     Does not grant any company. BMS ShareGrant is a separate step.
+    Never exposes switches / relays for sharing.
     """
 
     url = "/api/home_box/limited_share"
@@ -374,10 +412,12 @@ class LimitedShareView(HomeAssistantView):
             {
                 "ok": True,
                 **share,
+                "available_sensors": _available_binary_sensors(hass),
                 "active_company_grants": grants,
                 "note": (
-                    "Turning this on only allows limited status/support data to leave the box "
-                    "toward BMS. No company sees it until you grant them in BMS."
+                    "Turning this on only allows selected sensory feed data to leave "
+                    "the box toward BMS when the feed is positive. No company sees it "
+                    "until you grant them in BMS. Switches/relays are never shared."
                 ),
             }
         )
@@ -388,12 +428,31 @@ class LimitedShareView(HomeAssistantView):
         if user is None or not user.is_admin:
             return self.json({"ok": False, "error": "admin_required"}, status_code=403)
         data = await _json_body(request)
-        if "enabled" not in data:
+        if "enabled" not in data and "sensor_entities" not in data:
             return self.json(
-                {"ok": False, "error": "invalid_input", "hint": "JSON {\"enabled\": true|false}"},
+                {
+                    "ok": False,
+                    "error": "invalid_input",
+                    "hint": 'JSON {"enabled": true|false, "sensor_entities": ["binary_sensor.…"]}',
+                },
                 status_code=400,
             )
-        enabled = bool(data.get("enabled"))
-        body = await hass.async_add_executor_job(_share_sync_save, enabled)
-        _LOGGER.info("home_box_admin limited_share_enabled=%s", enabled)
+        current = await hass.async_add_executor_job(_share_sync_load)
+        enabled = (
+            bool(data.get("enabled"))
+            if "enabled" in data
+            else bool(current.get("limited_share_enabled"))
+        )
+        sensors = data.get("sensor_entities") if "sensor_entities" in data else None
+        if sensors is not None and not isinstance(sensors, list):
+            return self.json(
+                {"ok": False, "error": "invalid_input", "hint": "sensor_entities must be a list"},
+                status_code=400,
+            )
+        body = await hass.async_add_executor_job(_share_sync_save, enabled, sensors)
+        _LOGGER.info(
+            "home_box_admin limited_share_enabled=%s sensors=%s",
+            enabled,
+            len(body.get("sensor_entities") or []),
+        )
         return self.json({"ok": True, **body})

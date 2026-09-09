@@ -23,7 +23,7 @@
 | Service | Image / build | Job |
 | --- | --- | --- |
 | `homeassistant` | `home-box:local` from `image/Dockerfile` | HA Core + baked Python deps |
-| `platform-agent` | `python:3.12-alpine` + `platform/agent.py` | Enroll, heartbeat, status POST |
+| `platform-agent` | `python:3.12-alpine` + `platform/agent.py` | Enroll, heartbeat, **sensory feed** status POST |
 | `lan-router` | shares HA netns | Privacy iptables; optional SOCKS for Docker Desktop lab |
 
 ## Image strategy

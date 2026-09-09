@@ -43,12 +43,15 @@ services:
       BMS_APPLIANCE_UID: ${BMS_APPLIANCE_UID:-}
       BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
       BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
-      BMS_INTERVAL: ${BMS_INTERVAL:-20}
+      BMS_INTERVAL: ${BMS_INTERVAL:-5}
+      BMS_HEARTBEAT_EVERY: ${BMS_HEARTBEAT_EVERY:-4}
       BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-climate.heat_pump}
       HA_CONFIG: /config
       HOME_BOX_WG_CONTAINER: home-box-wireguard
+      BMS_AGENT_VERSION: ${BMS_AGENT_VERSION:-home-box-feed-0.1}
     volumes:
       - ./platform/agent.py:/app/agent.py:ro
+      - ./platform/sensor_feed.py:/app/sensor_feed.py:ro
       - ./platform/enroll_store.py:/app/enroll_store.py:ro
       - ./platform/wg_store.py:/app/wg_store.py:ro
       - ./platform/bms_fetch.py:/app/bms_fetch.py:ro

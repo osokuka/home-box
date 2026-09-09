@@ -22,7 +22,7 @@ Sidecar talks only to the operator repo APIs:
 | --- | --- | --- |
 | GET | `/api/v1/ingest/subscription/` | Plan, slug, fail-closed |
 | POST | `/api/v1/ingest/heartbeat/` | Box alive + service statuses |
-| POST | `/api/v1/ingest/status/` | **Read-only** device snapshot (mode, temps). No commands |
+| POST | `/api/v1/ingest/status/` | **Read-only** sensory snapshot (HVAC + selected binary sensors). Idle feeds are not posted. No commands |
 
 ### Auth and env
 
@@ -34,8 +34,10 @@ Sidecar talks only to the operator repo APIs:
 | `BMS_APPLIANCE_UID` | Env fallback unique ID (must match token) |
 | `BMS_HA_URL` | In-compose HA URL (`http://homeassistant:8123`) |
 | `BMS_HA_TOKEN` | Optional long-lived HA token for agent status / MCP |
-| `BMS_INTERVAL` | Poll seconds (default 20) |
-| `BMS_CLIMATE_ENTITY` | Optional climate hint for agent status mapping |
+| `BMS_INTERVAL` | Feed check seconds (default **5**) |
+| `BMS_HEARTBEAT_EVERY` | Heartbeat every N feed ticks (default 4 → ~20s) |
+| `BMS_CLIMATE_ENTITY` | Optional climate hint for feed mapping |
+| `BMS_AGENT_VERSION` | Agent version string (default `home-box-feed-0.1`) |
 
 Owner credentials and password reset are **not** env vars. See [`BMS_OWNER_AND_PASSWORD_HOOK.md`](./BMS_OWNER_AND_PASSWORD_HOOK.md): QR has no passwords; BMS exposes `machine.allow_password_reset`; box UI on `:8099`.
 
