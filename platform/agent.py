@@ -4,7 +4,8 @@ Loads enroll from /config/bms_enroll.json (first-run UI) or env fallback.
 GET subscription + POST heartbeat (+ appliance_uid).
 POST sensory status when:
   - box share allowlist / toggle changes (always push updated list), or
-  - share is ON and the feed is positive
+  - share is ON and the feed is positive, or
+  - share is ON and idle for BMS_IDLE_SNAPSHOT_SECONDS (default 60)
 POST home location when share is ON (on share change + heartbeat ticks).
 
 BMS auth = enroll token only. When sensory share is enabled, Home Box auto-creates
@@ -32,12 +33,14 @@ from sensor_feed import (
     collect_devices,
     collect_support_activity,
     share_signature,
+    should_idle_snapshot,
     should_post_feed,
 )
 
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
 INTERVAL = int(os.environ.get("BMS_INTERVAL", "5"))
 HEARTBEAT_EVERY = max(1, int(os.environ.get("BMS_HEARTBEAT_EVERY", "4")))
+IDLE_SNAPSHOT_SECONDS = max(0, int(os.environ.get("BMS_IDLE_SNAPSHOT_SECONDS", "60")))
 VERSION = os.environ.get("BMS_AGENT_VERSION", "home-box-feed-0.1")
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
 CLIMATE_ENTITY = os.environ.get("BMS_CLIMATE_ENTITY", "climate.heat_pump")
@@ -106,6 +109,7 @@ def push_home_location(*, share_on: bool, share_changed: bool, do_heartbeat: boo
 def loop() -> None:
     tick = 0
     last_share_sig = ""
+    last_status_post = 0.0
     while True:
         try:
             platform, token, uid = resolve_credentials()
@@ -213,6 +217,13 @@ def loop() -> None:
                 devices=devices,
                 sensor_entities=sensor_entities,
             )
+            if not post and should_idle_snapshot(
+                share_on=share_on,
+                feed_reason=reason,
+                seconds_since_last_post=time.monotonic() - last_status_post,
+                interval_seconds=float(IDLE_SNAPSHOT_SECONDS),
+            ):
+                post, reason = True, "idle_snapshot"
             if not post:
                 if reason != "share_off" or do_heartbeat:
                     print(
@@ -275,6 +286,7 @@ def loop() -> None:
                 flush=True,
             )
             last_share_sig = sig
+            last_status_post = time.monotonic()
         except urllib.error.HTTPError as err:
             body = err.read().decode(errors="replace")
             print("error", {"http": err.code, "body": body[:300]}, flush=True)

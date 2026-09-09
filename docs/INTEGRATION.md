@@ -37,6 +37,7 @@ Sidecar talks only to the operator repo APIs:
 | `BMS_HA_TOKEN` | Optional long-lived HA token for agent status / MCP |
 | `BMS_INTERVAL` | Feed check seconds (default **5**) |
 | `BMS_HEARTBEAT_EVERY` | Heartbeat every N feed ticks (default 4 → ~20s) |
+| `BMS_IDLE_SNAPSHOT_SECONDS` | Idle status snapshot while share ON (default **60**; `0` disables) |
 | `BMS_CLIMATE_ENTITY` | Optional climate hint for feed mapping |
 | `BMS_AGENT_VERSION` | Agent version string (default `home-box-feed-0.1`) |
 

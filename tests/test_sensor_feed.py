@@ -14,6 +14,7 @@ from sensor_feed import (  # noqa: E402
     feed_is_positive,
     is_shareable_sensor_entity,
     normalize_sensor_entities,
+    should_idle_snapshot,
     should_post_feed,
 )
 
@@ -155,6 +156,24 @@ def test_idle_skipped_without_change() -> None:
         sensor_entities=["binary_sensor.door"],
     )
     assert not ok and reason == "idle"
+    assert should_idle_snapshot(
+        share_on=True,
+        feed_reason="idle",
+        seconds_since_last_post=60.0,
+        interval_seconds=60.0,
+    )
+    assert not should_idle_snapshot(
+        share_on=True,
+        feed_reason="idle",
+        seconds_since_last_post=10.0,
+        interval_seconds=60.0,
+    )
+    assert not should_idle_snapshot(
+        share_on=False,
+        feed_reason="idle",
+        seconds_since_last_post=120.0,
+        interval_seconds=60.0,
+    )
 
 
 def main() -> None:

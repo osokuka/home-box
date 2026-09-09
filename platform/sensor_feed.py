@@ -226,7 +226,8 @@ def should_post_feed(
 
     Returns (should_post, reason).
     Share allowlist changes always push (including off / empty list).
-    Otherwise only positive feeds are posted while share is on.
+    Positive feeds post immediately while share is on.
+    Idle feeds are left to the agent idle-snapshot timer (see should_idle_snapshot).
     """
     if share_changed:
         return True, "share_changed"
@@ -237,6 +238,23 @@ def should_post_feed(
     if sensor_entities and not devices:
         return False, "idle_no_states"
     return False, "idle"
+
+
+def should_idle_snapshot(
+    *,
+    share_on: bool,
+    feed_reason: str,
+    seconds_since_last_post: float,
+    interval_seconds: float = 60.0,
+) -> bool:
+    """True when share is on, feed is idle, and the idle snapshot interval elapsed."""
+    if not share_on:
+        return False
+    if feed_reason not in {"idle", "idle_no_states"}:
+        return False
+    if interval_seconds <= 0:
+        return False
+    return seconds_since_last_post >= interval_seconds
 
 
 def collect_support_activity(states: list[dict] | None = None) -> list[dict[str, Any]]:

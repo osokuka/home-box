@@ -15,7 +15,7 @@ Passwords / device commands are never part of this path.
 | --- | --- |
 | Two gates | Box `limited_share_enabled` **and** active BMS `ShareGrant` |
 | Sensory only | Selected `binary_sensor.*` + HVAC status telemetry — **never** `switch.*` / DO |
-| Idle = no POST | Empty or inactive feed → heartbeat only, no `/ingest/status/` |
+| Idle = no positive POST | Empty/inactive feed → no immediate status POST; still sends an idle snapshot every **60s** while share is ON |
 | Positive = POST | Active binary sensor (`on`) and/or HVAC mode not `off`/`unknown` |
 | No commands | Companies cannot turn devices on/off via this share |
 | Box toggle ≠ grant | Enabling on the box does not pick a company |
@@ -30,7 +30,7 @@ Passwords / device commands are never part of this path.
 | Storage | `/config/bms_share.json` |
 | API | `GET/POST /api/home_box/limited_share` (includes `bms_manage_url`) |
 | Agent | Heartbeat ~20s; feed check every **5s** (env `BMS_INTERVAL`) |
-| Agent | `POST /ingest/status/` on **share allowlist change** (full updated list, including off) and when share ON + feed positive |
+| Agent | `POST /ingest/status/` on **share allowlist change**, when share ON + feed positive, and an **idle snapshot every 60s** (`BMS_IDLE_SNAPSHOT_SECONDS`) while share stays ON |
 | Agent | `POST /ingest/location/` when share is **ON** (on share change + heartbeat), using HA home latitude/longitude + `location_name` as `label`, `source: "box"`. Same enroll bearer as heartbeat/status. Skipped if coords are missing. |
 
 ### `bms_share.json` shape
@@ -65,8 +65,8 @@ Agent heartbeats limited_share_enabled=true
 Agent POSTs /ingest/location/ (HA home coords) on share change + heartbeats
 Agent polls feed every 5s
         │
-   feed idle ──▶ no status POST
-   feed positive ──▶ POST /ingest/status/
+   feed idle ──▶ idle snapshot every 60s (BMS_IDLE_SNAPSHOT_SECONDS)
+   feed positive ──▶ POST /ingest/status/ immediately
         │
   (still no company can see it)
         │
