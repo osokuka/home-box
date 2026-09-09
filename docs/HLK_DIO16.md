@@ -41,11 +41,13 @@ On **Docker Desktop (Windows lab)**, HA cannot route to `192.168.0.x` directly. 
 powershell -ExecutionPolicy Bypass -File .\tuya\socks5-windows.ps1
 ```
 
-3. Ensure `lan-router` is up:
+3. Ensure `lan-router` is up **in the same netns as HA**. After any `homeassistant` recreate/restart:
 
 ```bash
-docker compose up -d lan-router
+docker compose up -d --force-recreate lan-router
 ```
+
+(`depends_on` alone does not reattach `network_mode: service:homeassistant` children.)
 
 4. Smoke-test from inside HA:
 
@@ -103,6 +105,7 @@ Protocol framing was cross-checked against the MIT-licensed [jameshilliard/hlk-d
 | --- | --- |
 | Config flow / smoke: timeout from container | SOCKS script running? `lan-router` up? `ENABLE_LAN_SOCKS=1`? |
 | Host ping works, HA shows device unavailable | Start `tuya/socks5-windows.ps1` (required after every Windows reboot). Integration self-heals once SOCKS is back; wait up to ~30s or reload HLK if stuck |
+| Host ping + SOCKS OK, HA still unavailable after HA restart | Orphaned `lan-router` netns — `docker compose up -d --force-recreate lan-router` |
 | Host ping works, HA does not | Docker Desktop LAN path — SOCKS required on Windows lab |
 | Smoke test fails while integration is loaded | Device allows **one TCP client**; unload/disable the integration first, or trust HA’s connection |
 | Wrong device after DHCP change | Re-scan TCP `8080`, update the integration host, or re-add |

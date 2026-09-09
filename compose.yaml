@@ -224,6 +224,10 @@ services:
     container_name: home-box-lan-router
     restart: unless-stopped
     network_mode: "service:homeassistant"
+    # Must share HA's live netns. After homeassistant recreate/restart, also:
+    #   docker compose up -d --force-recreate lan-router
+    depends_on:
+      - homeassistant
     cap_add:
       - NET_ADMIN
     environment:
