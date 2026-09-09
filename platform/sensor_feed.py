@@ -170,6 +170,38 @@ def feed_is_positive(devices: list[dict[str, Any]]) -> bool:
     return False
 
 
+def share_signature(share: dict[str, Any]) -> str:
+    """Stable signature of box share consent + allowlist (for change detection)."""
+    enabled = "1" if share.get("limited_share_enabled") else "0"
+    updated = str(share.get("updated_at") or "")
+    sensors = ",".join(normalize_sensor_entities(share.get("sensor_entities")))
+    return f"{enabled}|{updated}|{sensors}"
+
+
+def should_post_feed(
+    *,
+    share_on: bool,
+    share_changed: bool,
+    devices: list[dict[str, Any]],
+    sensor_entities: list[str],
+) -> tuple[bool, str]:
+    """Decide whether to POST /ingest/status/.
+
+    Returns (should_post, reason).
+    Share allowlist changes always push (including off / empty list).
+    Otherwise only positive feeds are posted while share is on.
+    """
+    if share_changed:
+        return True, "share_changed"
+    if not share_on:
+        return False, "share_off"
+    if feed_is_positive(devices):
+        return True, "positive"
+    if sensor_entities and not devices:
+        return False, "idle_no_states"
+    return False, "idle"
+
+
 def collect_support_activity(states: list[dict] | None = None) -> list[dict[str, Any]]:
     """Limited troubleshooting signals — not full logs."""
     events: list[dict[str, Any]] = []

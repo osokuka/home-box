@@ -210,10 +210,10 @@ class HomeBoxCompanyAccess extends HTMLElement {
       <h2>Sensory share (this box)</h2>
       <p class="warn" id="shareStatus">Loading…</p>
       <p class="muted">
-        This box only chooses <strong>what</strong> may leave (sensors you select + HVAC status).
+        This box only chooses <strong>what</strong> may leave (sensors you select + HVAC when active).
         You choose <strong>who</strong> sees it in BMS. Relays/switches are never shared.
-        The feed agent checks every few seconds and posts only when the feed is <strong>positive</strong>
-        (an active sensor or active HVAC mode) — idle feeds are not pushed.
+        Changing the sensor list <strong>pushes an updated catalog to BMS immediately</strong>.
+        Live alerts also post when a shared sensor becomes active.
       </p>
       <div class="row">
         <label for="shareToggle">Allow sensory share to BMS</label>

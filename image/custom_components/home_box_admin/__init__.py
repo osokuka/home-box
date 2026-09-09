@@ -415,9 +415,10 @@ class LimitedShareView(HomeAssistantView):
                 "available_sensors": _available_binary_sensors(hass),
                 "active_company_grants": grants,
                 "note": (
-                    "Turning this on only allows selected sensory feed data to leave "
-                    "the box toward BMS when the feed is positive. No company sees it "
-                    "until you grant them in BMS. Switches/relays are never shared."
+                    "Turning this on allows selected sensory feed data to leave "
+                    "the box toward BMS. Changing the sensor list pushes an updated "
+                    "catalog immediately. No company sees it until you grant them in BMS. "
+                    "Switches/relays are never shared."
                 ),
             }
         )

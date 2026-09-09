@@ -2,10 +2,11 @@
 
 Loads enroll from /config/bms_enroll.json (first-run UI) or env fallback.
 GET subscription + POST heartbeat (+ appliance_uid).
-POST sensory status only when limited share is ON and the feed is positive.
-Checks the feed every BMS_INTERVAL seconds (default 5). Idle/empty → no status POST.
-Never calls Home Assistant services (no turn_on / set_hvac_mode).
-Never contacts device-vendor clouds. Outbound should be LAN/VPN only.
+POST sensory status when:
+  - box share allowlist / toggle changes (always push updated list), or
+  - share is ON and the feed is positive
+Uses the same BMS_HA_TOKEN / secrets bms_ha_token as MCP and tuya-import (GET only).
+Never calls Home Assistant services. Never contacts device-vendor clouds.
 """
 
 from __future__ import annotations
@@ -19,14 +20,18 @@ from pathlib import Path
 
 from bms_fetch import bms_request
 from bms_runtime import save_runtime_from_snapshot
-from bms_share import limited_share_enabled, load_share
+from bms_share import load_share
 from enroll_store import resolve_credentials
-from sensor_feed import collect_devices, collect_support_activity, feed_is_positive
+from ha_token import resolve_ha_token
+from sensor_feed import (
+    collect_devices,
+    collect_support_activity,
+    share_signature,
+    should_post_feed,
+)
 
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
-HA_TOKEN = os.environ.get("BMS_HA_TOKEN", "").strip()
 INTERVAL = int(os.environ.get("BMS_INTERVAL", "5"))
-# Heartbeat less often than feed checks (default: every 4 ticks ≈ 20s when interval=5).
 HEARTBEAT_EVERY = max(1, int(os.environ.get("BMS_HEARTBEAT_EVERY", "4")))
 VERSION = os.environ.get("BMS_AGENT_VERSION", "home-box-feed-0.1")
 CONFIG = Path(os.environ.get("HA_CONFIG", "/config"))
@@ -54,13 +59,13 @@ def api(method: str, path: str, body: dict | None = None) -> dict:
     return bms_request(method, path, body, timeout=15)
 
 
-def ha_get(path: str):
+def ha_get(path: str, token: str):
     """GET only. This agent must never POST /api/services."""
-    if not HA_TOKEN:
+    if not token:
         return None
     req = urllib.request.Request(
         f"{HA_URL}{path}",
-        headers={"Authorization": f"Bearer {HA_TOKEN}", "Accept": "application/json"},
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
         method="GET",
     )
     try:
@@ -92,6 +97,7 @@ def climate_from_restore():
 
 def loop() -> None:
     tick = 0
+    last_share_sig = ""
     while True:
         try:
             platform, token, uid = resolve_credentials()
@@ -100,13 +106,17 @@ def loop() -> None:
                 time.sleep(INTERVAL)
                 continue
 
+            ha_token = resolve_ha_token()
             share = load_share()
             share_on = bool(share.get("limited_share_enabled"))
             sensor_entities = list(share.get("sensor_entities") or [])
+            sig = share_signature(share)
+            share_changed = sig != last_share_sig
             do_heartbeat = tick % HEARTBEAT_EVERY == 0
             tick += 1
 
             snap: dict = {}
+            fail = False
             if do_heartbeat:
                 snap = api("GET", "/api/v1/ingest/subscription/")
                 fail = bool(snap.get("fail_closed"))
@@ -122,11 +132,16 @@ def loop() -> None:
                             else ha_row.get("status") or "degraded",
                             "detail": "appliance",
                         },
-                        {"id": "sensory-feed", "status": "ok"},
+                        {
+                            "id": "sensory-feed",
+                            "status": "ok" if ha_token else "degraded",
+                            "detail": "ha_token_set" if ha_token else "ha_token_missing",
+                        },
                         ha_row,
                     ],
                     "limited_share_enabled": share_on,
                     "limited_share_scope": scope,
+                    "sensor_share_count": len(sensor_entities),
                 }
                 if uid:
                     hb_body["appliance_uid"] = uid
@@ -144,66 +159,67 @@ def loop() -> None:
                 print(
                     f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
                     f"fail_closed={fail} pwd_reset={reset_flag} "
-                    f"limited_share={share_on} platform={platform}",
+                    f"limited_share={share_on} sensors={len(sensor_entities)} "
+                    f"ha_token={'set' if ha_token else 'missing'} platform={platform}",
                     flush=True,
                 )
-                if fail:
-                    time.sleep(INTERVAL)
-                    continue
-            else:
-                fail = False
 
             if fail:
                 time.sleep(INTERVAL)
                 continue
 
-            if not share_on:
-                if do_heartbeat:
-                    print(
-                        "limited share OFF — sensory feed not posted "
-                        "(enable under Company access on Home Box)",
-                        flush=True,
-                    )
-                time.sleep(INTERVAL)
-                continue
-
-            states = ha_get("/api/states")
+            states = ha_get("/api/states", ha_token)
             state_list = states if isinstance(states, list) else None
             if not state_list:
                 restored = climate_from_restore()
                 state_list = [restored] if restored else []
 
+            # Catalog sync on allowlist change: sensors only (no forced HVAC).
+            # Live positive events may still include climate.
+            include_climate = not share_changed
             devices = collect_devices(
                 state_list,
                 climate_entity=CLIMATE_ENTITY,
-                sensor_entities=sensor_entities,
-                include_climate=True,
+                sensor_entities=sensor_entities if share_on else [],
+                include_climate=include_climate and share_on,
             )
-            if not feed_is_positive(devices):
-                print(
-                    f"feed idle — not posting "
-                    f"(devices={len(devices)} sensors={len(sensor_entities)})",
-                    flush=True,
-                )
+            post, reason = should_post_feed(
+                share_on=share_on,
+                share_changed=share_changed,
+                devices=devices,
+                sensor_entities=sensor_entities,
+            )
+            if not post:
+                if reason != "share_off" or do_heartbeat:
+                    print(
+                        f"feed skip reason={reason} "
+                        f"devices={len(devices)} sensors={len(sensor_entities)}",
+                        flush=True,
+                    )
                 time.sleep(INTERVAL)
                 continue
 
-            activity = collect_support_activity(state_list)
+            activity = collect_support_activity(state_list) if share_on else []
             posted = api(
                 "POST",
                 "/api/v1/ingest/status/",
                 {
                     "devices": devices,
                     "support_activity": activity,
-                    "limited_share": True,
+                    "limited_share": share_on,
                     "feed": "sensory",
+                    "share_revision": share.get("updated_at"),
+                    "sensor_entities": sensor_entities if share_on else [],
+                    "reason": reason,
                 },
             )
             print(
-                f"feed positive count={posted.get('count')} "
-                f"devices={len(devices)} activity={len(activity)}",
+                f"feed push reason={reason} count={posted.get('count')} "
+                f"devices={len(devices)} sensors={len(sensor_entities)} "
+                f"activity={len(activity)}",
                 flush=True,
             )
+            last_share_sig = sig
         except urllib.error.HTTPError as err:
             body = err.read().decode(errors="replace")
             print("error", {"http": err.code, "body": body[:300]}, flush=True)
@@ -214,10 +230,12 @@ def loop() -> None:
 
 if __name__ == "__main__":
     platform, token, uid = resolve_credentials()
+    ha_token = resolve_ha_token()
     print(
         f"sensory-feed ingest {platform} uid={uid or 'unset'} "
-        f"token={'set' if token else 'missing'} every {INTERVAL}s "
-        f"(status only when share ON and feed positive)",
+        f"enroll_token={'set' if token else 'missing'} "
+        f"ha_token={'set' if ha_token else 'missing'} every {INTERVAL}s "
+        f"(push on share change or positive feed)",
         flush=True,
     )
     loop()

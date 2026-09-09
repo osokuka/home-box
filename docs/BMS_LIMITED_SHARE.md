@@ -30,7 +30,7 @@ Passwords / device commands are never part of this path.
 | Storage | `/config/bms_share.json` |
 | API | `GET/POST /api/home_box/limited_share` |
 | Agent | Heartbeat ~20s; feed check every **5s** (env `BMS_INTERVAL`) |
-| Agent | `POST /ingest/status/` only when share ON **and** `feed_is_positive` |
+| Agent | `POST /ingest/status/` on **share allowlist change** (full updated list, including off) and when share ON + feed positive |
 
 ### `bms_share.json` shape
 

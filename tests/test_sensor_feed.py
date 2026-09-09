@@ -86,11 +86,51 @@ def test_positive_when_hvac_active() -> None:
     assert feed_is_positive(devices) is True
 
 
+def test_share_change_always_posts() -> None:
+    from sensor_feed import should_post_feed
+
+    ok, reason = should_post_feed(
+        share_on=True,
+        share_changed=True,
+        devices=[],
+        sensor_entities=["binary_sensor.door"],
+    )
+    assert ok and reason == "share_changed"
+    ok2, reason2 = should_post_feed(
+        share_on=False,
+        share_changed=True,
+        devices=[],
+        sensor_entities=[],
+    )
+    assert ok2 and reason2 == "share_changed"
+
+
+def test_idle_skipped_without_change() -> None:
+    from sensor_feed import should_post_feed
+
+    devices = [
+        {
+            "class": "binary_input",
+            "health": "online",
+            "telemetry": {"sensor.state": False},
+        }
+    ]
+    ok, reason = should_post_feed(
+        share_on=True,
+        share_changed=False,
+        devices=devices,
+        sensor_entities=["binary_sensor.door"],
+    )
+    assert not ok and reason == "idle"
+
+
 def main() -> None:
     test_rejects_switches()
     test_idle_when_sensors_off()
     test_positive_when_sensor_on()
     test_positive_when_hvac_active()
+    test_share_change_always_posts()
+    test_idle_skipped_without_change()
     print("sensor_feed checks: OK")
 
 
