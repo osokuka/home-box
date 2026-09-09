@@ -2,6 +2,8 @@
 
 Deep module: callers pass HA states + share config and get
 (devices, should_push) without knowing entity-id rules.
+
+Sensor domain/system is client-chosen — never inferred (no hardcoded security/hvac for DI).
 """
 
 from __future__ import annotations
@@ -15,26 +17,41 @@ def slug_key(name: str, fallback: str) -> str:
     return text or fallback
 
 
+def classify_system(raw: Any) -> str:
+    """Normalize client classification for BMS domains (empty if unset)."""
+    return slug_key(str(raw or "").strip(), "")
+
+
 def is_shareable_sensor_entity(entity_id: str) -> bool:
     """Only binary_sensor.* — never switches / relays / controls."""
     eid = (entity_id or "").strip().lower()
     return eid.startswith("binary_sensor.")
 
 
-def normalize_sensor_entities(raw: Any) -> list[str]:
+def normalize_sensor_entries(raw: Any) -> list[dict[str, str]]:
+    """Accept legacy string ids or {entity_id, system} objects."""
     if not isinstance(raw, list):
         return []
-    out: list[str] = []
+    out: list[dict[str, str]] = []
     seen: set[str] = set()
     for item in raw:
-        eid = str(item or "").strip().lower()
-        if not is_shareable_sensor_entity(eid):
+        if isinstance(item, str):
+            eid = item.strip().lower()
+            system = ""
+        elif isinstance(item, dict):
+            eid = str(item.get("entity_id") or "").strip().lower()
+            system = classify_system(item.get("system") or item.get("domain") or "")
+        else:
             continue
-        if eid in seen:
+        if not is_shareable_sensor_entity(eid) or eid in seen:
             continue
         seen.add(eid)
-        out.append(eid)
+        out.append({"entity_id": eid, "system": system})
     return out
+
+
+def normalize_sensor_entities(raw: Any) -> list[str]:
+    return [row["entity_id"] for row in normalize_sensor_entries(raw)]
 
 
 def map_climate(state: dict) -> dict[str, Any]:
@@ -57,6 +74,7 @@ def map_climate(state: dict) -> dict[str, Any]:
     if action:
         telemetry["hvac.action"] = action
     title = attrs.get("friendly_name") or "Heat pump"
+    # Climate entities are HVAC by nature of the HA domain (climate.*), not a guess.
     return {
         "id": slug_key(title, "heat-pump"),
         "class": "heat_pump",
@@ -67,7 +85,9 @@ def map_climate(state: dict) -> dict[str, Any]:
     }
 
 
-def map_binary_sensor(state: dict) -> dict[str, Any] | None:
+def map_binary_sensor(
+    state: dict, *, system: str
+) -> dict[str, Any] | None:
     eid = str(state.get("entity_id") or "")
     if not is_shareable_sensor_entity(eid):
         return None
@@ -81,10 +101,11 @@ def map_binary_sensor(state: dict) -> dict[str, Any] | None:
         active = ha_state in ("on", "true", "1", "open", "detected")
     title = attrs.get("friendly_name") or eid
     device_class = str(attrs.get("device_class") or "sensor")
+    system_slug = classify_system(system)
     return {
         "id": slug_key(title, eid.replace(".", "-")),
         "class": "binary_input",
-        "system": "security",
+        "system": system_slug,
         "display_name": title,
         "health": health,
         "telemetry": {
@@ -92,6 +113,7 @@ def map_binary_sensor(state: dict) -> dict[str, Any] | None:
             "sensor.state": active,
             "sensor.raw": ha_state,
             "sensor.device_class": device_class,
+            "sensor.system": system_slug,
         },
     }
 
@@ -100,10 +122,11 @@ def collect_devices(
     states: list[dict] | None,
     *,
     climate_entity: str,
-    sensor_entities: list[str],
+    sensors: list[dict[str, str]] | None = None,
+    sensor_entities: list[str] | None = None,
     include_climate: bool = True,
 ) -> list[dict[str, Any]]:
-    """Build BMS device list from HA states (sensors allowlist + optional climate)."""
+    """Build BMS device list from HA states + client sensor classifications."""
     devices: list[dict[str, Any]] = []
     by_id: dict[str, dict] = {}
     if isinstance(states, list):
@@ -111,26 +134,29 @@ def collect_devices(
             if isinstance(st, dict) and st.get("entity_id"):
                 by_id[str(st["entity_id"]).lower()] = st
 
-    allowed = normalize_sensor_entities(sensor_entities)
-    for eid in allowed:
+    entries = normalize_sensor_entries(sensors if sensors is not None else sensor_entities)
+    for entry in entries:
+        eid = entry["entity_id"]
+        system = entry.get("system") or ""
         st = by_id.get(eid)
         if not st:
             devices.append(
                 {
                     "id": slug_key(eid, eid.replace(".", "-")),
                     "class": "binary_input",
-                    "system": "security",
+                    "system": system,
                     "display_name": eid,
                     "health": "unknown",
                     "telemetry": {
                         "sensor.entity_id": eid,
                         "sensor.state": None,
                         "sensor.raw": "missing",
+                        "sensor.system": system,
                     },
                 }
             )
             continue
-        mapped = map_binary_sensor(st)
+        mapped = map_binary_sensor(st, system=system)
         if mapped:
             devices.append(mapped)
 
@@ -139,7 +165,6 @@ def collect_devices(
         if climate:
             devices.append(map_climate(climate))
         else:
-            # Prefer any climate.* if configured entity missing
             for eid, st in by_id.items():
                 if eid.startswith("climate."):
                     devices.append(map_climate(st))
@@ -171,10 +196,15 @@ def feed_is_positive(devices: list[dict[str, Any]]) -> bool:
 
 
 def share_signature(share: dict[str, Any]) -> str:
-    """Stable signature of box share consent + allowlist (for change detection)."""
+    """Stable signature of box share consent + allowlist + classifications."""
     enabled = "1" if share.get("limited_share_enabled") else "0"
     updated = str(share.get("updated_at") or "")
-    sensors = ",".join(normalize_sensor_entities(share.get("sensor_entities")))
+    entries = normalize_sensor_entries(
+        share.get("sensors")
+        if share.get("sensors") is not None
+        else share.get("sensor_entities")
+    )
+    sensors = ",".join(f"{e['entity_id']}:{e.get('system') or ''}" for e in entries)
     return f"{enabled}|{updated}|{sensors}"
 
 

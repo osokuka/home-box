@@ -2,6 +2,8 @@ class HomeBoxCompanyAccess extends HTMLElement {
   _hass;
   _busy = false;
   _available = [];
+  /** @type {Map<string, string>} entity_id -> client classification */
+  _classifications = new Map();
   _selected = new Set();
 
   connectedCallback() {
@@ -45,7 +47,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       const data = await this.api("GET", "/api/home_box/limited_share");
       const on = !!data.limited_share_enabled;
       status.textContent = on
-        ? "Sensory share is ON — selected sensors / HVAC status may leave this box toward BMS when the feed is positive. No company sees it until you grant them in BMS."
+        ? "Sensory share is ON — selected sensors leave with the classification you set. No company sees them until you grant that company in BMS."
         : "Sensory share is OFF — nothing is posted for companies.";
       status.className = on ? "ok" : "warn";
       if (toggle) toggle.checked = on;
@@ -53,16 +55,28 @@ class HomeBoxCompanyAccess extends HTMLElement {
       this._available = Array.isArray(data.available_sensors)
         ? data.available_sensors
         : [];
-      this._selected = new Set(
-        (data.sensor_entities || []).map((e) => String(e).toLowerCase())
-      );
+      this._selected = new Set();
+      this._classifications = new Map();
+      const saved = Array.isArray(data.sensors) ? data.sensors : [];
+      for (const row of saved) {
+        const id = String((row && row.entity_id) || "").toLowerCase();
+        if (!id) continue;
+        this._selected.add(id);
+        this._classifications.set(id, String((row && row.system) || ""));
+      }
+      // Legacy id-only list
+      for (const eid of data.sensor_entities || []) {
+        const id = String(eid).toLowerCase();
+        if (!this._selected.has(id)) this._selected.add(id);
+        if (!this._classifications.has(id)) this._classifications.set(id, "");
+      }
       if (sensorBox) this.renderSensors(sensorBox);
 
       if (grants) {
         const list = data.active_company_grants || [];
         if (!list.length) {
           grants.innerHTML =
-            "<p class='muted'>No company grants visible yet. After you enable share, grant a company in BMS (security, HVAC, …).</p>";
+            "<p class='muted'>No company grants visible yet. After you enable share, grant a company in BMS for the domains you use.</p>";
         } else {
           grants.innerHTML =
             "<ul>" +
@@ -95,9 +109,11 @@ class HomeBoxCompanyAccess extends HTMLElement {
       .map((s) => {
         const id = String(s.entity_id || "").toLowerCase();
         const checked = this._selected.has(id) ? "checked" : "";
+        const classify = this._classifications.get(id) || "";
         const label = s.name || id;
         return (
-          "<label class='sensor'>" +
+          "<div class='sensor'>" +
+          "<label class='check'>" +
           "<input type='checkbox' data-eid='" +
           id +
           "' " +
@@ -108,38 +124,70 @@ class HomeBoxCompanyAccess extends HTMLElement {
           " <code>" +
           id +
           "</code></span>" +
-          "</label>"
+          "</label>" +
+          "<label class='classify'>Classify as" +
+          "<input type='text' data-sys='" +
+          id +
+          "' value='" +
+          classify.replace(/'/g, "&#39;") +
+          "' placeholder='e.g. hvac, security, electricity' " +
+          (checked ? "" : "disabled ") +
+          "/>" +
+          "</label>" +
+          "</div>"
         );
       })
       .join("");
     host.querySelectorAll("input[type=checkbox]").forEach((el) => {
+      el.addEventListener("change", () => {
+        const id = el.getAttribute("data-eid");
+        const sys = host.querySelector("input[data-sys='" + id + "']");
+        if (sys) sys.disabled = !el.checked;
+        this.onSensorChange();
+      });
+    });
+    host.querySelectorAll("input[type=text]").forEach((el) => {
       el.addEventListener("change", () => this.onSensorChange());
+      el.addEventListener("blur", () => this.onSensorChange());
     });
   }
 
   selectedSensors() {
-    return Array.from(this._selected);
+    const host = this.querySelector("#sensorList");
+    const out = [];
+    if (!host) return out;
+    host.querySelectorAll("input[type=checkbox]").forEach((el) => {
+      if (!el.checked) return;
+      const id = el.getAttribute("data-eid");
+      const sysEl = host.querySelector("input[data-sys='" + id + "']");
+      out.push({
+        entity_id: id,
+        system: ((sysEl && sysEl.value) || "").trim().toLowerCase(),
+      });
+    });
+    return out;
   }
 
   async onSensorChange() {
-    const host = this.querySelector("#sensorList");
-    if (!host) return;
-    this._selected = new Set();
-    host.querySelectorAll("input[type=checkbox]").forEach((el) => {
-      if (el.checked) this._selected.add(el.getAttribute("data-eid"));
-    });
     if (this._busy || !this._hass) return;
     this._busy = true;
     const msg = this.querySelector("#shareMsg");
     try {
       const toggle = this.querySelector("#shareToggle");
+      const sensors = this.selectedSensors();
+      this._selected = new Set(sensors.map((s) => s.entity_id));
+      this._classifications = new Map(
+        sensors.map((s) => [s.entity_id, s.system || ""])
+      );
       await this.api("POST", "/api/home_box/limited_share", {
         enabled: !!(toggle && toggle.checked),
-        sensor_entities: this.selectedSensors(),
+        sensors,
       });
       if (msg) {
         msg.textContent =
-          "Saved sensor allowlist (" + this._selected.size + " selected).";
+          "Saved " +
+          sensors.length +
+          " sensor(s). Catalog pushed to BMS with your classifications.";
         msg.className = "msg";
       }
     } catch (e) {
@@ -160,11 +208,11 @@ class HomeBoxCompanyAccess extends HTMLElement {
     try {
       await this.api("POST", "/api/home_box/limited_share", {
         enabled,
-        sensor_entities: this.selectedSensors(),
+        sensors: this.selectedSensors(),
       });
       if (msg) {
         msg.textContent = enabled
-          ? "Enabled. Feed posts only when positive (active sensor / active HVAC). Next: grant the company in BMS."
+          ? "Enabled. Classify each sensor; grant matching domains in BMS."
           : "Disabled. Sensory feed will stop posting.";
         msg.className = "msg";
       }
@@ -187,7 +235,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
         h1 { font-size: 1.4rem; margin: 0 0 0.5rem; }
         h2 { font-size: 1.1rem; margin: 1.4rem 0 0.45rem; }
         code { background: #e8eee9; padding: 0.1em 0.35em; font-size: 0.85em; }
-        ol, ul { padding-left: 1.2rem; }
+        ul { padding-left: 1.2rem; }
         .warn { border-left: 4px solid #c4a35a; padding-left: 12px; }
         .ok { border-left: 4px solid #2f6f4e; padding-left: 12px; }
         .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
@@ -198,9 +246,13 @@ class HomeBoxCompanyAccess extends HTMLElement {
         .msg { margin-top: 0.5rem; font-size: 0.9rem; }
         .err { color: #8b2e2e; }
         input[type=checkbox] { width: 1.25rem; height: 1.25rem; }
-        #sensorList { display: flex; flex-direction: column; gap: 0.45rem; margin: 0.75rem 0 1rem; }
-        .sensor { display: flex; gap: 0.6rem; align-items: flex-start; padding: 0.45rem 0.6rem; background: #f4f7f5; border: 1px solid #c5d0c8; }
-        .sensor span { flex: 1; font-size: 0.92rem; }
+        #sensorList { display: flex; flex-direction: column; gap: 0.55rem; margin: 0.75rem 0 1rem; }
+        .sensor { display: flex; flex-direction: column; gap: 0.4rem; padding: 0.55rem 0.65rem; background: #f4f7f5; border: 1px solid #c5d0c8; }
+        .check { display: flex; gap: 0.6rem; align-items: flex-start; }
+        .check span { flex: 1; font-size: 0.92rem; }
+        .classify { display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85rem; color: #5c6b63; }
+        .classify input[type=text] { padding: 0.35rem 0.45rem; border: 1px solid #c5d0c8; font: inherit; color: #1a1f1c; }
+        .classify input[type=text]:disabled { opacity: 0.5; }
       </style>
       <div class="brand">
         <img src="/local/home-box-logo.svg" alt="Home Box" />
@@ -210,10 +262,10 @@ class HomeBoxCompanyAccess extends HTMLElement {
       <h2>Sensory share (this box)</h2>
       <p class="warn" id="shareStatus">Loading…</p>
       <p class="muted">
-        This box only chooses <strong>what</strong> may leave (sensors you select + HVAC when active).
-        You choose <strong>who</strong> sees it in BMS. Relays/switches are never shared.
-        Changing the sensor list <strong>pushes an updated catalog to BMS immediately</strong>.
-        Live alerts also post when a shared sensor becomes active.
+        You choose <strong>which</strong> sensors leave and <strong>how they are classified</strong>
+        (domain/category for BMS). Home Box does not invent categories.
+        Changing the list pushes an updated catalog to BMS. You still choose
+        <strong>who</strong> sees them via grants in BMS. Relays/switches are never shared.
       </p>
       <div class="row">
         <label for="shareToggle">Allow sensory share to BMS</label>
@@ -221,7 +273,7 @@ class HomeBoxCompanyAccess extends HTMLElement {
       </div>
 
       <h2>Sensors to include</h2>
-      <p class="muted">HLK digital inputs and other binary sensors. Leave unchecked to omit.</p>
+      <p class="muted">Check a sensor, then classify it (e.g. <code>hvac</code>, <code>security</code>, <code>electricity</code>).</p>
       <div id="sensorList"><p class="muted">Loading…</p></div>
       <div class="msg" id="shareMsg"></div>
 

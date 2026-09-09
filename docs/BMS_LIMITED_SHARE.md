@@ -34,19 +34,9 @@ Passwords / device commands are never part of this path.
 
 ### `bms_share.json` shape
 
-```json
-{
-  "v": 1,
-  "limited_share_enabled": true,
-  "scope": ["status", "support_activity", "sensors"],
-  "sensor_entities": [
-    "binary_sensor.hlk_dio16_192_168_0_49_di01"
-  ],
-  "updated_at": "…"
-}
-```
-
-`sensor_entities` must be `binary_sensor.*` only; other domains are dropped.
+`sensors`: `[{ "entity_id": "binary_sensor.…", "system": "<client classification>" }]`  
+`system` is chosen by the homeowner (e.g. `hvac`, `security`) — Home Box never invents it.  
+`sensor_entities` remains a derived id list for older readers.
 
 ---
 

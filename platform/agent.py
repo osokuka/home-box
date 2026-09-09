@@ -109,6 +109,7 @@ def loop() -> None:
             ha_token = resolve_ha_token()
             share = load_share()
             share_on = bool(share.get("limited_share_enabled"))
+            sensor_entries = list(share.get("sensors") or [])
             sensor_entities = list(share.get("sensor_entities") or [])
             sig = share_signature(share)
             share_changed = sig != last_share_sig
@@ -141,7 +142,7 @@ def loop() -> None:
                     ],
                     "limited_share_enabled": share_on,
                     "limited_share_scope": scope,
-                    "sensor_share_count": len(sensor_entities),
+                    "sensor_share_count": len(sensor_entries),
                 }
                 if uid:
                     hb_body["appliance_uid"] = uid
@@ -159,7 +160,7 @@ def loop() -> None:
                 print(
                     f"ok slug={house} uid={uid or '-'} live={hb.get('live_status')} "
                     f"fail_closed={fail} pwd_reset={reset_flag} "
-                    f"limited_share={share_on} sensors={len(sensor_entities)} "
+                    f"limited_share={share_on} sensors={len(sensor_entries)} "
                     f"ha_token={'set' if ha_token else 'missing'} platform={platform}",
                     flush=True,
                 )
@@ -174,15 +175,19 @@ def loop() -> None:
                 restored = climate_from_restore()
                 state_list = [restored] if restored else []
 
-            # Catalog sync on allowlist change: sensors only (no forced HVAC).
-            # Live positive events may still include climate.
             include_climate = not share_changed
             devices = collect_devices(
                 state_list,
                 climate_entity=CLIMATE_ENTITY,
-                sensor_entities=sensor_entities if share_on else [],
+                sensors=sensor_entries if share_on else [],
                 include_climate=include_climate and share_on,
             )
+            # Do not invent domains — omit binary sensors the client has not classified.
+            devices = [
+                d
+                for d in devices
+                if d.get("class") != "binary_input" or str(d.get("system") or "").strip()
+            ]
             post, reason = should_post_feed(
                 share_on=share_on,
                 share_changed=share_changed,
@@ -193,13 +198,14 @@ def loop() -> None:
                 if reason != "share_off" or do_heartbeat:
                     print(
                         f"feed skip reason={reason} "
-                        f"devices={len(devices)} sensors={len(sensor_entities)}",
+                        f"devices={len(devices)} sensors={len(sensor_entries)}",
                         flush=True,
                     )
                 time.sleep(INTERVAL)
                 continue
 
             activity = collect_support_activity(state_list) if share_on else []
+            # Keep ingest body on the known BMS contract (no extra experimental keys).
             posted = api(
                 "POST",
                 "/api/v1/ingest/status/",
@@ -207,15 +213,11 @@ def loop() -> None:
                     "devices": devices,
                     "support_activity": activity,
                     "limited_share": share_on,
-                    "feed": "sensory",
-                    "share_revision": share.get("updated_at"),
-                    "sensor_entities": sensor_entities if share_on else [],
-                    "reason": reason,
                 },
             )
             print(
                 f"feed push reason={reason} count={posted.get('count')} "
-                f"devices={len(devices)} sensors={len(sensor_entities)} "
+                f"devices={len(devices)} sensors={len(sensor_entries)} "
                 f"activity={len(activity)}",
                 flush=True,
             )

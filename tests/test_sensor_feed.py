@@ -14,6 +14,7 @@ from sensor_feed import (  # noqa: E402
     feed_is_positive,
     is_shareable_sensor_entity,
     normalize_sensor_entities,
+    should_post_feed,
 )
 
 
@@ -41,10 +42,11 @@ def test_idle_when_sensors_off() -> None:
     devices = collect_devices(
         states,
         climate_entity="climate.heat_pump",
-        sensor_entities=["binary_sensor.door"],
+        sensors=[{"entity_id": "binary_sensor.door", "system": "security"}],
     )
     assert len(devices) == 2
     assert feed_is_positive(devices) is False
+    assert devices[0]["system"] == "security"
 
 
 def test_positive_when_sensor_on() -> None:
@@ -58,12 +60,29 @@ def test_positive_when_sensor_on() -> None:
     devices = collect_devices(
         states,
         climate_entity="climate.heat_pump",
-        sensor_entities=["binary_sensor.door"],
+        sensors=[{"entity_id": "binary_sensor.door", "system": "hvac"}],
         include_climate=False,
     )
     assert feed_is_positive(devices) is True
-    assert devices[0]["system"] == "security"
-    assert "switch" not in devices[0]["telemetry"].get("sensor.entity_id", "")
+    assert devices[0]["system"] == "hvac"
+    assert devices[0]["display_name"] == "Door"
+
+
+def test_client_classification_not_assumed() -> None:
+    states = [
+        {
+            "entity_id": "binary_sensor.door",
+            "state": "off",
+            "attributes": {"friendly_name": "Door"},
+        }
+    ]
+    devices = collect_devices(
+        states,
+        climate_entity="climate.heat_pump",
+        sensors=[{"entity_id": "binary_sensor.door", "system": ""}],
+        include_climate=False,
+    )
+    assert devices[0]["system"] == ""
 
 
 def test_positive_when_hvac_active() -> None:
@@ -81,14 +100,12 @@ def test_positive_when_hvac_active() -> None:
     devices = collect_devices(
         states,
         climate_entity="climate.heat_pump",
-        sensor_entities=[],
+        sensors=[],
     )
     assert feed_is_positive(devices) is True
 
 
 def test_share_change_always_posts() -> None:
-    from sensor_feed import should_post_feed
-
     ok, reason = should_post_feed(
         share_on=True,
         share_changed=True,
@@ -106,8 +123,6 @@ def test_share_change_always_posts() -> None:
 
 
 def test_idle_skipped_without_change() -> None:
-    from sensor_feed import should_post_feed
-
     devices = [
         {
             "class": "binary_input",
@@ -128,6 +143,7 @@ def main() -> None:
     test_rejects_switches()
     test_idle_when_sensors_off()
     test_positive_when_sensor_on()
+    test_client_classification_not_assumed()
     test_positive_when_hvac_active()
     test_share_change_always_posts()
     test_idle_skipped_without_change()

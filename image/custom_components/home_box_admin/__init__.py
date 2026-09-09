@@ -325,43 +325,68 @@ class PasswordResetView(HomeAssistantView):
 
 def _share_sync_load() -> dict[str, Any]:
     data = _read_json_sync(SHARE_PATH)
-    sensors: list[str] = []
-    raw = data.get("sensor_entities")
+    raw = data.get("sensors")
+    if raw is None:
+        raw = data.get("sensor_entities")
+    sensors: list[dict[str, str]] = []
+    seen: set[str] = set()
     if isinstance(raw, list):
         for item in raw:
-            eid = str(item or "").strip().lower()
-            if eid.startswith("binary_sensor.") and eid not in sensors:
-                sensors.append(eid)
+            if isinstance(item, str):
+                eid = item.strip().lower()
+                system = ""
+            elif isinstance(item, dict):
+                eid = str(item.get("entity_id") or "").strip().lower()
+                system = str(item.get("system") or item.get("domain") or "").strip().lower()
+            else:
+                continue
+            if not eid.startswith("binary_sensor.") or eid in seen:
+                continue
+            seen.add(eid)
+            sensors.append({"entity_id": eid, "system": system})
     return {
         "limited_share_enabled": bool(data.get("limited_share_enabled")),
         "scope": list(data.get("scope") or ["status", "support_activity", "sensors"]),
-        "sensor_entities": sensors,
+        "sensors": sensors,
+        "sensor_entities": [s["entity_id"] for s in sensors],
         "updated_at": data.get("updated_at"),
     }
 
 
 def _share_sync_save(
-    enabled: bool, sensor_entities: list[str] | None = None
+    enabled: bool,
+    sensors: list[Any] | None = None,
 ) -> dict[str, Any]:
     from datetime import datetime, timezone
 
     current = _share_sync_load()
-    if sensor_entities is None:
-        sensors = list(current.get("sensor_entities") or [])
+    if sensors is None:
+        entries = list(current.get("sensors") or [])
     else:
-        sensors = []
-        for item in sensor_entities:
-            eid = str(item or "").strip().lower()
-            if eid.startswith("binary_sensor.") and eid not in sensors:
-                sensors.append(eid)
+        entries = []
+        seen: set[str] = set()
+        for item in sensors:
+            if isinstance(item, str):
+                eid = item.strip().lower()
+                system = ""
+            elif isinstance(item, dict):
+                eid = str(item.get("entity_id") or "").strip().lower()
+                system = str(item.get("system") or item.get("domain") or "").strip().lower()
+            else:
+                continue
+            if not eid.startswith("binary_sensor.") or eid in seen:
+                continue
+            seen.add(eid)
+            entries.append({"entity_id": eid, "system": system})
     body = {
-        "v": 1,
+        "v": 2,
         "limited_share_enabled": bool(enabled),
         "scope": ["status", "support_activity", "sensors"],
-        "sensor_entities": sensors,
+        "sensors": entries,
+        "sensor_entities": [s["entity_id"] for s in entries],
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "note": (
-            "Box consent only. Selects which sensory entities may leave toward BMS. "
+            "Box consent only. Client classifies each sensor (system/domain). "
             "No company sees data until the homeowner grants them in BMS."
         ),
     }
@@ -415,9 +440,9 @@ class LimitedShareView(HomeAssistantView):
                 "available_sensors": _available_binary_sensors(hass),
                 "active_company_grants": grants,
                 "note": (
-                    "Turning this on allows selected sensory feed data to leave "
-                    "the box toward BMS. Changing the sensor list pushes an updated "
-                    "catalog immediately. No company sees it until you grant them in BMS. "
+                    "Select sensors and classify each one yourself (e.g. hvac, security). "
+                    "Home Box never invents a category. Changing the list pushes an updated "
+                    "catalog to BMS. Companies only see data after you grant them in BMS. "
                     "Switches/relays are never shared."
                 ),
             }
@@ -429,12 +454,12 @@ class LimitedShareView(HomeAssistantView):
         if user is None or not user.is_admin:
             return self.json({"ok": False, "error": "admin_required"}, status_code=403)
         data = await _json_body(request)
-        if "enabled" not in data and "sensor_entities" not in data:
+        if "enabled" not in data and "sensors" not in data and "sensor_entities" not in data:
             return self.json(
                 {
                     "ok": False,
                     "error": "invalid_input",
-                    "hint": 'JSON {"enabled": true|false, "sensor_entities": ["binary_sensor.…"]}',
+                    "hint": 'JSON {"enabled": true|false, "sensors": [{"entity_id":"binary_sensor.…","system":"hvac"}]}',
                 },
                 status_code=400,
             )
@@ -444,16 +469,18 @@ class LimitedShareView(HomeAssistantView):
             if "enabled" in data
             else bool(current.get("limited_share_enabled"))
         )
-        sensors = data.get("sensor_entities") if "sensor_entities" in data else None
+        sensors = data.get("sensors") if "sensors" in data else data.get("sensor_entities")
+        if "sensors" not in data and "sensor_entities" not in data:
+            sensors = None
         if sensors is not None and not isinstance(sensors, list):
             return self.json(
-                {"ok": False, "error": "invalid_input", "hint": "sensor_entities must be a list"},
+                {"ok": False, "error": "invalid_input", "hint": "sensors must be a list"},
                 status_code=400,
             )
         body = await hass.async_add_executor_job(_share_sync_save, enabled, sensors)
         _LOGGER.info(
             "home_box_admin limited_share_enabled=%s sensors=%s",
             enabled,
-            len(body.get("sensor_entities") or []),
+            len(body.get("sensors") or []),
         )
         return self.json({"ok": True, **body})
