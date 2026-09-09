@@ -57,7 +57,7 @@ panel_custom:
     sidebar_title: Getting started
     sidebar_icon: mdi:home-variant
     url_path: getting-started
-    module_url: /local/home-box-getting-started.js
+    module_url: /local/home-box-getting-started.js?v=20260909-ux
     require_admin: true
   - name: home-box-company-access
     sidebar_title: Company access
