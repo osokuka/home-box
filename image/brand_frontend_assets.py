@@ -3,6 +3,8 @@
 
 Patches:
   - hass_frontend HTML/JS product chrome
+  - hass_frontend logbook translation strings
+  - Core homeassistant logbook + start/stop trigger descriptions
   - home_assistant_intents greetings (Hello from Home Box.)
   - conversation DefaultAgent display name when present on disk
   - /config assist pipeline display name (if storage exists)
@@ -20,6 +22,10 @@ BRAND = "Home Box"
 
 FRONTEND_ROOTS = list(Path("/usr/local/lib").glob("python*/site-packages/hass_frontend"))
 INTENTS_ROOTS = list(Path("/usr/local/lib").glob("python*/site-packages/home_assistant_intents"))
+CORE_ROOTS = [
+    Path("/usr/src/homeassistant/homeassistant"),
+    *Path("/usr/local/lib").glob("python*/site-packages/homeassistant"),
+]
 
 REPLACEMENTS: list[tuple[str, str]] = [
     (">Home Assistant</title>", f">{BRAND}</title>"),
@@ -34,6 +40,12 @@ REPLACEMENTS: list[tuple[str, str]] = [
     ("`Home Assistant`", f"`{BRAND}`"),
     ("Hello from Home Assistant.", f"Hello from {BRAND}."),
     ("Hello from Home Assistant", f"Hello from {BRAND}"),
+    ("triggered by Home Assistant starting", f"triggered by {BRAND} starting"),
+    ("triggered by Home Assistant stopping", f"triggered by {BRAND} stopping"),
+    ("Home Assistant starting", f"{BRAND} starting"),
+    ("Home Assistant stopping", f"{BRAND} stopping"),
+    ("Home Assistant started", f"{BRAND} started"),
+    ("Home Assistant stopped", f"{BRAND} stopped"),
     (
         "Apps require the Home Assistant Operating System",
         f"Apps are not part of {BRAND}",
@@ -135,6 +147,99 @@ def patch_default_agent_name() -> int:
     return changed
 
 
+def _core_component_paths(*parts: str) -> list[Path]:
+    found: list[Path] = []
+    seen: set[Path] = set()
+    for root in CORE_ROOTS:
+        path = root.joinpath(*parts)
+        if path.is_file() and path not in seen:
+            seen.add(path)
+            found.append(path)
+    return found
+
+
+def patch_logbook_core() -> int:
+    """Brand Home Assistant start/stop rows in Activity (logbook)."""
+    changed = 0
+    logbook_repls = [
+        ('LOGBOOK_ENTRY_NAME: "Home Assistant"', f'LOGBOOK_ENTRY_NAME: "{BRAND}"'),
+        ("LOGBOOK_ENTRY_NAME: 'Home Assistant'", f"LOGBOOK_ENTRY_NAME: '{BRAND}'"),
+        ('LOGBOOK_ENTRY_ICON: "mdi:home-assistant"', 'LOGBOOK_ENTRY_ICON: "mdi:cube-outline"'),
+        ("LOGBOOK_ENTRY_ICON: 'mdi:home-assistant'", "LOGBOOK_ENTRY_ICON: 'mdi:cube-outline'"),
+    ]
+    for path in _core_component_paths("components", "homeassistant", "logbook.py"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        new = text
+        for old, repl in logbook_repls:
+            new = new.replace(old, repl)
+        if new != text:
+            path.write_text(new, encoding="utf-8")
+            changed += 1
+            print(f"home-box-brand-assets: logbook core {path}", flush=True)
+
+    trigger_repls = [
+        ('"description": "Home Assistant starting"', f'"description": "{BRAND} starting"'),
+        ('"description": "Home Assistant stopping"', f'"description": "{BRAND} stopping"'),
+        ("'description': 'Home Assistant starting'", f"'description': '{BRAND} starting'"),
+        ("'description': 'Home Assistant stopping'", f"'description': '{BRAND} stopping'"),
+    ]
+    for path in _core_component_paths(
+        "components", "homeassistant", "triggers", "homeassistant.py"
+    ):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        new = text
+        for old, repl in trigger_repls:
+            new = new.replace(old, repl)
+        if new != text:
+            path.write_text(new, encoding="utf-8")
+            changed += 1
+            print(f"home-box-brand-assets: start trigger {path}", flush=True)
+    return changed
+
+
+def patch_frontend_translations(root: Path) -> int:
+    """Rewrite logbook HA start/stop copy in shipped locale packs."""
+    trans = root / "static" / "translations"
+    if not trans.is_dir():
+        return 0
+    needles = (
+        "Home Assistant starting",
+        "Home Assistant stopping",
+        "Home Assistant started",
+        "Home Assistant stopped",
+    )
+    changed = 0
+    for path in trans.glob("*.json"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if not any(n in text for n in needles):
+            continue
+        new = patch_text(text)
+        if new == text:
+            continue
+        try:
+            json.loads(new)
+        except Exception as err:
+            print(f"home-box-brand-assets: skip invalid {path}: {err}", flush=True)
+            continue
+        path.write_text(new, encoding="utf-8")
+        for ext in (".br", ".gz"):
+            sibling = Path(str(path) + ext)
+            if sibling.is_file():
+                sibling.unlink(missing_ok=True)
+        changed += 1
+        print(f"home-box-brand-assets: translation {path.name}", flush=True)
+    return changed
+
+
 def patch_pipeline_storage() -> int:
     path = Path("/config/.storage/assist_pipeline.pipelines")
     if not path.is_file():
@@ -182,6 +287,8 @@ def patch_frontend(root: Path) -> int:
                 "– Home Assistant" in sample
                 or 'sidebarTitle:"Home Assistant"' in sample
                 or "Hello from Home Assistant" in sample
+                or "Home Assistant starting" in sample
+                or "Home Assistant stopping" in sample
             ):
                 if p not in targets:
                     targets.append(p)
@@ -194,6 +301,7 @@ def patch_frontend(root: Path) -> int:
                 print(f"home-box-brand-assets: patched {path}", flush=True)
         except Exception as err:
             print(f"home-box-brand-assets: skip {path}: {err}", flush=True)
+    changed += patch_frontend_translations(root)
     return changed
 
 
@@ -211,6 +319,7 @@ def main() -> int:
 
     changed += patch_intents()
     changed += patch_default_agent_name()
+    changed += patch_logbook_core()
     changed += patch_pipeline_storage()
 
     print(f"home-box-brand-assets: done changed={changed}", flush=True)
