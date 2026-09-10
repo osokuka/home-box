@@ -1,4 +1,5 @@
 .env
+scripts/docker-hub.env
 config/secrets.yaml
 config/bms_enroll.json
 config/bms_enroll.tmp

@@ -1,0 +1,45 @@
+# Living-room blind from two HLK relays (never leave both on).
+# DO03 = Up/Open, DO04 = Down/Close, both off = Stop/neutral.
+# Swap the entity_ids below if the motor direction is reversed.
+#
+# Idle state must NOT be "open"/"closed" — with no end-stop sensors HA would
+# grey out one direction. "unknown" + assumed_state keeps Open/Close/Stop usable.
+
+homeassistant:
+  customize:
+    cover.living_room_blind:
+      assumed_state: true
+
+template:
+  - cover:
+      - name: "Living room blind"
+        unique_id: living_room_blind_hlk_do03_do04
+        device_class: shutter
+        open_cover:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.hlk_dio16_192_168_0_49_do04
+          - action: switch.turn_on
+            target:
+              entity_id: switch.hlk_dio16_192_168_0_49_do03
+        close_cover:
+          - action: switch.turn_off
+            target:
+              entity_id: switch.hlk_dio16_192_168_0_49_do03
+          - action: switch.turn_on
+            target:
+              entity_id: switch.hlk_dio16_192_168_0_49_do04
+        stop_cover:
+          - action: switch.turn_off
+            target:
+              entity_id:
+                - switch.hlk_dio16_192_168_0_49_do03
+                - switch.hlk_dio16_192_168_0_49_do04
+        state: >-
+          {% if is_state('switch.hlk_dio16_192_168_0_49_do03', 'on') %}
+            opening
+          {% elif is_state('switch.hlk_dio16_192_168_0_49_do04', 'on') %}
+            closing
+          {% else %}
+            unknown
+          {% endif %}

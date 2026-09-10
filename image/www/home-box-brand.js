@@ -1,11 +1,14 @@
 /**
  * Home Box product chrome (minimal).
  * Asset patches already brand most UI strings.
- * This module only keeps the tab title + sidebar label stable.
+ * This module keeps the tab title + sidebar label stable, and diverts the
+ * stock Home Assistant Apps / add-on store routes to Home Box Extras.
  * Do NOT rewrite arbitrary DOM — that breaks Settings dialogs (People, etc.).
  */
 const BRAND = "Home Box";
 const HA_RE = /Home Assistant/g;
+const APPS_RE = /^\/config\/apps(\/|$)/i;
+const EXTRAS_PATH = "/extras";
 
 (function patchDocumentTitle() {
   const desc = Object.getOwnPropertyDescriptor(Document.prototype, "title");
@@ -44,6 +47,13 @@ function forceSidebar(el) {
   paintSidebarTitle(el);
 }
 
+function divertHaAppsRoute() {
+  const path = location.pathname || "";
+  if (!APPS_RE.test(path)) return false;
+  location.replace(EXTRAS_PATH);
+  return true;
+}
+
 customElements.whenDefined("ha-sidebar").then(() => {
   const Ctor = customElements.get("ha-sidebar");
   if (!Ctor?.prototype) return;
@@ -68,4 +78,20 @@ setInterval(() => {
   document.querySelectorAll("ha-sidebar").forEach(forceSidebar);
 }, 3000);
 
-console.info("[home-box-brand] minimal chrome →", BRAND);
+// Divert stock HA Apps routes as soon as this module loads, and on SPA navigations.
+divertHaAppsRoute();
+window.addEventListener("popstate", divertHaAppsRoute);
+const _pushState = history.pushState.bind(history);
+const _replaceState = history.replaceState.bind(history);
+history.pushState = function pushState(state, title, url) {
+  const ret = _pushState(state, title, url);
+  queueMicrotask(divertHaAppsRoute);
+  return ret;
+};
+history.replaceState = function replaceState(state, title, url) {
+  const ret = _replaceState(state, title, url);
+  queueMicrotask(divertHaAppsRoute);
+  return ret;
+};
+
+console.info("[home-box-brand] minimal chrome →", BRAND, "(apps → extras)");

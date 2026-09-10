@@ -1,4 +1,5 @@
 FROM python:3.12-alpine
 RUN pip install --no-cache-dir "mcp[cli]==1.9.4"
 WORKDIR /app
+COPY mcp_server.py ha_readonly.py ha_control.py ha_token.py enroll_store.py ./
 CMD ["python", "-u", "/app/mcp_server.py"]

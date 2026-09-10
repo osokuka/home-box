@@ -26,8 +26,108 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "home_box_admin"
 CONFIG = Path("/config")
 ENROLL_PATH = CONFIG / "bms_enroll.json"
-RUNTIME_PATH = CONFIG / "bms_runtime.json"
 SHARE_PATH = CONFIG / "bms_share.json"
+RUNTIME_PATH = CONFIG / "bms_runtime.json"
+SECRETS_PATH = CONFIG / "secrets.yaml"
+DEFAULT_BMS_PORTAL_URL = "https://bms.scardustech.com/portal"
+SENSORY_TOKEN_CLIENT_NAME = "Home Box sensory feed"
+
+
+def _bms_manage_url() -> str:
+    """Public BMS URL where the homeowner manages company share grants."""
+    import os
+    import re
+
+    env = str(os.environ.get("BMS_PORTAL_URL") or "").strip().rstrip("/")
+    if env:
+        return env
+    if SECRETS_PATH.is_file():
+        try:
+            text = SECRETS_PATH.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+        match = re.search(
+            r"(?m)^\s*bms_portal_url\s*:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
+            text,
+        )
+        if match:
+            return str(match.group(1) or "").strip().rstrip("/")
+    return DEFAULT_BMS_PORTAL_URL
+
+
+def _read_bms_ha_token_from_secrets() -> str:
+    import re
+
+    if not SECRETS_PATH.is_file():
+        return ""
+    try:
+        text = SECRETS_PATH.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+    match = re.search(
+        r"(?m)^\s*bms_ha_token\s*:\s*[\"']?([^\"'\n#]+?)[\"']?\s*(?:#.*)?$",
+        text,
+    )
+    return (match.group(1).strip() if match else "")
+
+
+def _upsert_bms_ha_token(token: str) -> None:
+    """Store/replace bms_ha_token in secrets.yaml (box-local; never returned to BMS)."""
+    import re
+
+    token = (token or "").strip()
+    if not token:
+        return
+    text = ""
+    if SECRETS_PATH.is_file():
+        try:
+            text = SECRETS_PATH.read_text(encoding="utf-8")
+        except Exception:
+            text = ""
+    line = f"bms_ha_token: {token}"
+    if re.search(r"(?m)^\s*bms_ha_token\s*:", text):
+        text = re.sub(r"(?m)^\s*bms_ha_token\s*:.*$", line, text, count=1)
+    else:
+        note = (
+            "\n# Auto-created when Allow sensory share to BMS was enabled "
+            "(read-only HA access for the sensory-feed agent).\n"
+        )
+        text = (text.rstrip() + note + line + "\n") if text.strip() else (line + "\n")
+    SECRETS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SECRETS_PATH.with_suffix(".tmp")
+    tmp.write_text(text if text.endswith("\n") else text + "\n", encoding="utf-8")
+    tmp.replace(SECRETS_PATH)
+
+
+async def _ensure_sensory_ha_token(hass: HomeAssistant, user) -> tuple[bool, str]:
+    """Ensure a long-lived HA token exists for sensory-feed when share is ON.
+
+    Returns (created_or_rotated, detail). Never returns the token value to callers
+    that might serialize it to the browser/BMS.
+    """
+    from datetime import timedelta
+
+    from homeassistant.auth.models import TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN
+
+    existing = await hass.async_add_executor_job(_read_bms_ha_token_from_secrets)
+    if existing:
+        refresh = await hass.auth.async_validate_access_token(existing)
+        if refresh is not None:
+            return False, "ha_token_present"
+
+    refresh_token = await hass.auth.async_create_refresh_token(
+        user,
+        client_name=SENSORY_TOKEN_CLIENT_NAME,
+        token_type=TOKEN_TYPE_LONG_LIVED_ACCESS_TOKEN,
+        access_token_expiration=timedelta(days=3650),
+    )
+    access = hass.auth.async_create_access_token(refresh_token)
+    await hass.async_add_executor_job(_upsert_bms_ha_token, access)
+    _LOGGER.info(
+        "home_box_admin created long-lived HA token for sensory feed (user=%s)",
+        getattr(user, "name", None) or getattr(user, "id", "?"),
+    )
+    return True, "ha_token_created"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -325,24 +425,112 @@ class PasswordResetView(HomeAssistantView):
 
 def _share_sync_load() -> dict[str, Any]:
     data = _read_json_sync(SHARE_PATH)
+    raw = data.get("sensors")
+    if raw is None:
+        raw = data.get("sensor_entities")
+    sensors: list[dict[str, str]] = []
+    seen: set[str] = set()
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, str):
+                eid = item.strip().lower()
+                system = ""
+            elif isinstance(item, dict):
+                eid = str(item.get("entity_id") or "").strip().lower()
+                system = str(item.get("system") or item.get("domain") or "").strip().lower()
+            else:
+                continue
+            if not eid.startswith("binary_sensor.") or eid in seen:
+                continue
+            seen.add(eid)
+            sensors.append({"entity_id": eid, "system": system})
+    cats: list[str] = []
+    cat_seen: set[str] = set()
+    for item in data.get("categories") if isinstance(data.get("categories"), list) else []:
+        slug = str(item or "").strip().lower().replace(" ", "-")
+        slug = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in slug)
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        slug = slug.strip("-")
+        if not slug or slug in cat_seen:
+            continue
+        cat_seen.add(slug)
+        cats.append(slug)
+    for row in sensors:
+        slug = str(row.get("system") or "").strip()
+        if slug and slug not in cat_seen:
+            cat_seen.add(slug)
+            cats.append(slug)
+    cats.sort()
     return {
         "limited_share_enabled": bool(data.get("limited_share_enabled")),
-        "scope": list(data.get("scope") or ["status", "support_activity"]),
+        "scope": list(data.get("scope") or ["status", "support_activity", "sensors"]),
+        "categories": cats,
+        "sensors": sensors,
+        "sensor_entities": [s["entity_id"] for s in sensors],
         "updated_at": data.get("updated_at"),
     }
 
 
-def _share_sync_save(enabled: bool) -> dict[str, Any]:
+def _share_sync_save(
+    enabled: bool,
+    sensors: list[Any] | None = None,
+    categories: list[Any] | None = None,
+) -> dict[str, Any]:
     from datetime import datetime, timezone
 
+    current = _share_sync_load()
+    if sensors is None:
+        entries = list(current.get("sensors") or [])
+    else:
+        entries = []
+        seen: set[str] = set()
+        for item in sensors:
+            if isinstance(item, str):
+                eid = item.strip().lower()
+                system = ""
+            elif isinstance(item, dict):
+                eid = str(item.get("entity_id") or "").strip().lower()
+                system = str(item.get("system") or item.get("domain") or "").strip().lower()
+            else:
+                continue
+            if not eid.startswith("binary_sensor.") or eid in seen:
+                continue
+            seen.add(eid)
+            entries.append({"entity_id": eid, "system": system})
+    if categories is None:
+        cat_raw = current.get("categories") or []
+    else:
+        cat_raw = categories
+    cats: list[str] = []
+    cat_seen: set[str] = set()
+    for item in cat_raw if isinstance(cat_raw, list) else []:
+        slug = str(item or "").strip().lower().replace(" ", "-")
+        slug = "".join(ch if ch.isalnum() or ch == "-" else "-" for ch in slug)
+        while "--" in slug:
+            slug = slug.replace("--", "-")
+        slug = slug.strip("-")
+        if not slug or slug in cat_seen:
+            continue
+        cat_seen.add(slug)
+        cats.append(slug)
+    for row in entries:
+        slug = str(row.get("system") or "").strip()
+        if slug and slug not in cat_seen:
+            cat_seen.add(slug)
+            cats.append(slug)
+    cats.sort()
     body = {
-        "v": 1,
+        "v": 2,
         "limited_share_enabled": bool(enabled),
-        "scope": ["status", "support_activity"],
+        "scope": ["status", "support_activity", "sensors"],
+        "categories": cats,
+        "sensors": entries,
+        "sensor_entities": [s["entity_id"] for s in entries],
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "note": (
-            "Box consent only. No company sees data until the homeowner "
-            "grants a limited share to that company in BMS."
+            "Box consent only. Client labels each sensor (domain or location). "
+            "No company sees data until the homeowner grants them in BMS."
         ),
     }
     SHARE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -352,10 +540,28 @@ def _share_sync_save(enabled: bool) -> dict[str, Any]:
     return body
 
 
+def _available_binary_sensors(hass: HomeAssistant) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for state in hass.states.async_all("binary_sensor"):
+        eid = state.entity_id
+        attrs = state.attributes or {}
+        rows.append(
+            {
+                "entity_id": eid,
+                "name": attrs.get("friendly_name") or eid,
+                "state": state.state,
+                "device_class": attrs.get("device_class"),
+            }
+        )
+    rows.sort(key=lambda r: str(r.get("entity_id") or ""))
+    return rows
+
+
 class LimitedShareView(HomeAssistantView):
-    """Owner toggle for limited share consent (status + support activity).
+    """Owner toggle for limited sensory share (status + selected binary sensors).
 
     Does not grant any company. BMS ShareGrant is a separate step.
+    Never exposes switches / relays for sharing.
     """
 
     url = "/api/home_box/limited_share"
@@ -369,15 +575,24 @@ class LimitedShareView(HomeAssistantView):
             return self.json({"ok": False, "error": "admin_required"}, status_code=403)
         share = await hass.async_add_executor_job(_share_sync_load)
         runtime = await _read_json(hass, RUNTIME_PATH)
-        grants = runtime.get("shares") if isinstance(runtime.get("shares"), list) else []
+        household = (
+            runtime.get("household") if isinstance(runtime.get("household"), dict) else {}
+        )
+        manage_url = await hass.async_add_executor_job(_bms_manage_url)
+        ha_token = await hass.async_add_executor_job(_read_bms_ha_token_from_secrets)
         return self.json(
             {
                 "ok": True,
                 **share,
-                "active_company_grants": grants,
+                "available_sensors": _available_binary_sensors(hass),
+                "bms_manage_url": manage_url,
+                "household_name": household.get("name") or household.get("slug") or "",
+                "household_slug": household.get("slug") or "",
+                "ha_token_configured": bool(ha_token),
                 "note": (
-                    "Turning this on only allows limited status/support data to leave the box "
-                    "toward BMS. No company sees it until you grant them in BMS."
+                    "Create categories, select sensors, assign a category to each, then Save. "
+                    "Enabling sensory share creates a local HA read token automatically. "
+                    "Manage which companies see data in BMS. Switches/relays are never shared."
                 ),
             }
         )
@@ -388,12 +603,75 @@ class LimitedShareView(HomeAssistantView):
         if user is None or not user.is_admin:
             return self.json({"ok": False, "error": "admin_required"}, status_code=403)
         data = await _json_body(request)
-        if "enabled" not in data:
+        if (
+            "enabled" not in data
+            and "sensors" not in data
+            and "sensor_entities" not in data
+            and "categories" not in data
+        ):
             return self.json(
-                {"ok": False, "error": "invalid_input", "hint": "JSON {\"enabled\": true|false}"},
+                {
+                    "ok": False,
+                    "error": "invalid_input",
+                    "hint": (
+                        'JSON {"enabled": true|false, "categories": ["hvac","kitchen"], '
+                        '"sensors": [{"entity_id":"binary_sensor.…","system":"hvac"}]}'
+                    ),
+                },
                 status_code=400,
             )
-        enabled = bool(data.get("enabled"))
-        body = await hass.async_add_executor_job(_share_sync_save, enabled)
-        _LOGGER.info("home_box_admin limited_share_enabled=%s", enabled)
-        return self.json({"ok": True, **body})
+        current = await hass.async_add_executor_job(_share_sync_load)
+        enabled = (
+            bool(data.get("enabled"))
+            if "enabled" in data
+            else bool(current.get("limited_share_enabled"))
+        )
+        sensors = data.get("sensors") if "sensors" in data else data.get("sensor_entities")
+        if "sensors" not in data and "sensor_entities" not in data:
+            sensors = None
+        if sensors is not None and not isinstance(sensors, list):
+            return self.json(
+                {"ok": False, "error": "invalid_input", "hint": "sensors must be a list"},
+                status_code=400,
+            )
+        categories = data.get("categories") if "categories" in data else None
+        if categories is not None and not isinstance(categories, list):
+            return self.json(
+                {"ok": False, "error": "invalid_input", "hint": "categories must be a list"},
+                status_code=400,
+            )
+        body = await hass.async_add_executor_job(
+            _share_sync_save, enabled, sensors, categories
+        )
+        token_detail = "ha_token_skipped"
+        if enabled:
+            try:
+                _created, token_detail = await _ensure_sensory_ha_token(hass, user)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.exception("home_box_admin failed to ensure sensory HA token")
+                return self.json(
+                    {
+                        "ok": False,
+                        "error": "ha_token_failed",
+                        "detail": str(exc)[:200],
+                        **body,
+                    },
+                    status_code=500,
+                )
+        _LOGGER.info(
+            "home_box_admin limited_share_enabled=%s sensors=%s categories=%s %s",
+            enabled,
+            len(body.get("sensors") or []),
+            len(body.get("categories") or []),
+            token_detail,
+        )
+        return self.json(
+            {
+                "ok": True,
+                **body,
+                "ha_token_configured": bool(
+                    await hass.async_add_executor_job(_read_bms_ha_token_from_secrets)
+                ),
+                "ha_token_status": token_detail,
+            }
+        )

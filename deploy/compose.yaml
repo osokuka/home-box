@@ -1,0 +1,148 @@
+# Home Box — production compose (Docker Hub images, no source bind-mounts).
+# Deploy with deploy.ps1 / deploy.sh which writes .env (no secrets required).
+
+name: home-box
+
+services:
+  homeassistant:
+    image: ${HOME_BOX_IMAGE:-avniademi/home-box}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-core
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      - ${HOME_BOX_DATA:-./data}/config:/config
+    networks:
+      - ha
+
+  gateway:
+    image: ${HOME_BOX_GATEWAY_IMAGE:-avniademi/home-box-gateway}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-gateway
+    restart: unless-stopped
+    ports:
+      - "${HOME_BOX_HTTP_PORT:-8123}:8123"
+    depends_on:
+      - homeassistant
+      - enroll-ui
+      - tuya-import
+      - home-box-mcp
+    networks:
+      - ha
+
+  platform-agent:
+    image: ${HOME_BOX_ENROLL_IMAGE:-avniademi/home-box-enroll}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-agent
+    restart: unless-stopped
+    hostname: platform-agent
+    environment:
+      TZ: ${TZ:-UTC}
+      BMS_PLATFORM_URL: ${BMS_PLATFORM_URL:-}
+      BMS_ENROLL_TOKEN: ${BMS_ENROLL_TOKEN:-}
+      BMS_APPLIANCE_UID: ${BMS_APPLIANCE_UID:-}
+      BMS_HA_URL: ${BMS_HA_URL:-http://homeassistant:8123}
+      BMS_HA_TOKEN: ${BMS_HA_TOKEN:-}
+      BMS_INTERVAL: ${BMS_INTERVAL:-5}
+      BMS_HEARTBEAT_EVERY: ${BMS_HEARTBEAT_EVERY:-4}
+      BMS_CLIMATE_ENTITY: ${BMS_CLIMATE_ENTITY:-climate.heat_pump}
+      HA_CONFIG: /config
+      HOME_BOX_WG_CONTAINER: home-box-wireguard
+      BMS_AGENT_VERSION: ${BMS_AGENT_VERSION:-home-box-feed-0.1}
+    volumes:
+      - ${HOME_BOX_DATA:-./data}/config:/config
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-u", "/app/agent.py"]
+    depends_on:
+      - homeassistant
+    networks:
+      - ha
+
+  enroll-ui:
+    image: ${HOME_BOX_ENROLL_IMAGE:-avniademi/home-box-enroll}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-enroll
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      ENROLL_ALLOW_RESET: ${ENROLL_ALLOW_RESET:-0}
+      HOME_BOX_OPEN_URL: ${HOME_BOX_OPEN_URL:-}
+      HOME_BOX_WG_CONTAINER: home-box-wireguard
+      HA_CONFIG: /config
+    volumes:
+      - ${HOME_BOX_DATA:-./data}/config:/config
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: ["python", "-u", "/app/enroll_ui.py"]
+    networks:
+      - ha
+
+  wireguard:
+    image: lscr.io/linuxserver/wireguard:1.0.20210914-r4-ls50
+    container_name: home-box-wireguard
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    environment:
+      TZ: ${TZ:-UTC}
+      PUID: "0"
+      PGID: "0"
+    volumes:
+      - ${HOME_BOX_DATA:-./data}/config/wireguard:/config
+      - /lib/modules:/lib/modules:ro
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    networks:
+      - ha
+
+  wg-ha-proxy:
+    image: alpine/socat:1.8.0.0
+    container_name: home-box-wg-ha-proxy
+    restart: unless-stopped
+    network_mode: "service:wireguard"
+    depends_on:
+      - wireguard
+      - homeassistant
+    command: ["TCP-LISTEN:8123,fork,reuseaddr", "TCP:homeassistant:8123"]
+
+  tuya-import:
+    image: ${HOME_BOX_TUYA_IMAGE:-avniademi/home-box-tuya-import}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-tuya-import
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      HA_CONFIG: /config
+    volumes:
+      - ${HOME_BOX_DATA:-./data}/config:/config
+    depends_on:
+      - homeassistant
+    networks:
+      - ha
+
+  home-box-mcp:
+    image: ${HOME_BOX_MCP_IMAGE:-avniademi/home-box-mcp}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-mcp
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-UTC}
+      HA_CONFIG: /config
+      HOME_BOX_MCP_ALLOW_CONTROL: ${HOME_BOX_MCP_ALLOW_CONTROL:-1}
+    volumes:
+      - ${HOME_BOX_DATA:-./data}/config:/config:ro
+    depends_on:
+      - homeassistant
+    networks:
+      - ha
+
+  lan-router:
+    image: ${HOME_BOX_LAN_IMAGE:-avniademi/home-box-lan-router}:${HOME_BOX_TAG:-latest}
+    container_name: home-box-lan-router
+    restart: unless-stopped
+    network_mode: "service:homeassistant"
+    depends_on:
+      - homeassistant
+    cap_add:
+      - NET_ADMIN
+    environment:
+      ENABLE_LAN_SOCKS: ${ENABLE_LAN_SOCKS:-0}
+
+networks:
+  ha:
+    name: ha

@@ -19,7 +19,7 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 
 | Doc | Purpose |
 | --- | --- |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, network, privacy model |
+| [docs/GATEWAY.md](docs/GATEWAY.md) | Single host port `:8123` nginx path routes |
 | [docs/INTEGRATION.md](docs/INTEGRATION.md) | How the box talks to BMS (ingest contract) |
 | [docs/ONBOARDING_LAB.md](docs/ONBOARDING_LAB.md) | Lab enroll UI (:8099) + camera QR + unique ID |
 | [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md) | Tuya Local + HLK-DIO16 (local only) |
@@ -33,14 +33,16 @@ Home Box is **not** the operator console and **not** a company portal. Trades mo
 
 ## Current lab access
 
-- Direct: `http://127.0.0.1:8123` or LAN `http://192.168.0.10:8123`
+- Gateway (sole host port): `http://127.0.0.1:8123/` → Home Box UI
+- Enroll: `http://127.0.0.1:8123/enroll/`
+- Tuya import: `http://127.0.0.1:8123/import/`
+- MCP SSE: `http://127.0.0.1:8123/mcp/sse`
 - Via BMS nginx: `http://windows-lab.ha.localhost:8080` (hosts entry required)
-- Enroll UI: `http://127.0.0.1:8099/`
 - WireGuard / edge: `{slug}.scardustech.com` (e.g. lab `box-aq`) — see [docs/WIREGUARD_QR.md](docs/WIREGUARD_QR.md)
 
 ## Status
 
-- Default stack: HA Core + WireGuard + WG HA proxy + agent + enroll (:8099) + Tuya import (:8098) + MCP (:8100) + privacy LAN router
+- Default stack: HA Core + **nginx gateway (:8123 only)** + WireGuard + WG HA proxy + sensory-feed agent + enroll + Tuya import + MCP + privacy LAN router
 - Product name: **Home Box** — see `NOTICE` and [docs/REBRAND.md](docs/REBRAND.md)
 - Tuya: **Local only** via CSV/manual — [docs/TUYA_DEVICE_IMPORT.md](docs/TUYA_DEVICE_IMPORT.md)
 - Digital I/O: **HLK-DIO16** over LAN TCP — [docs/HLK_DIO16.md](docs/HLK_DIO16.md)

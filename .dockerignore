@@ -1,0 +1,10 @@
+# Never bake runtime secrets or this machine's config into images.
+config/
+.env
+**/.env
+**/docker-hub.env
+scripts/docker-hub.env
+**/__pycache__/
+*.pyc
+.git/
+deploy/data/

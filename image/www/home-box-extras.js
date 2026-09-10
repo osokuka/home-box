@@ -1,8 +1,8 @@
 /**
- * Home Box Getting started — same visual language as Company access.
- * Shadow DOM so HA dark theme cannot wash out the page.
+ * Home Box Extras — replaces the stock HA Apps / add-on store.
+ * Same visual language as Company access / Getting started (shadow DOM).
  */
-class HomeBoxGettingStarted extends HTMLElement {
+class HomeBoxExtras extends HTMLElement {
   connectedCallback() {
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
@@ -94,23 +94,12 @@ class HomeBoxGettingStarted extends HTMLElement {
           font-size: 0.9rem;
           margin: 0 0 0.65rem;
         }
-        ol.steps, ul.links {
+        ul.links {
           margin: 0.35rem 0 0;
           padding-left: 1.25rem;
           color: #14201a;
         }
-        ol.steps li, ul.links li {
-          margin: 0.45rem 0;
-        }
-        code {
-          font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
-          font-size: 0.78rem;
-          background: #e2ebe5;
-          color: #14201a;
-          padding: 0.12em 0.4em;
-          border-radius: 3px;
-          word-break: break-all;
-        }
+        ul.links li { margin: 0.45rem 0; }
         a {
           color: #2f6f4e;
           font-weight: 650;
@@ -154,71 +143,55 @@ class HomeBoxGettingStarted extends HTMLElement {
           <div class="brand">
             <img src="/local/home-box-logo.svg" alt="Home Box" />
           </div>
-          <h1>Getting started</h1>
+          <h1>Extras</h1>
           <p class="lede">
-            Your household appliance for local control. Day-to-day use stays on this box —
-            no Tuya cloud, Nabu Casa, or Smart Life.
+            Home Box is a locked-down household appliance. Extra capability is built into
+            this product — not an open Home Assistant app store.
           </p>
 
           <p class="banner ok">
-            You are on <strong>Home Box</strong>. Open-source Home Assistant Core powers the engine
-            under the hood (see NOTICE) — the product surface is Home Box.
+            You are on <strong>Home Box</strong>. The Home Assistant Operating System app store
+            is not part of this product.
           </p>
 
-          <section class="section" aria-labelledby="takeover-heading">
-            <h2 id="takeover-heading">1. Takeover checklist</h2>
-            <p class="muted">Confirm you own the box before day-to-day use.</p>
-            <ol class="steps">
-              <li>Open Home Box on your household URL (LAN or <code>https://…scardustech.com</code>).</li>
-              <li>Sign in with <strong>your</strong> owner account — not an installer password you do not control.</li>
-              <li>Confirm rooms and devices you expect are visible.</li>
-              <li>Optional: add household members under Settings → People.</li>
-              <li>Tell BMS when takeover is done so they can mark the box <code>taken_over</code>.</li>
-            </ol>
-            <p class="banner warn" style="margin-top:0.85rem;margin-bottom:0;">
-              Takeover does not cancel the subscription. The box stays enrolled with BMS for status sharing.
-            </p>
-          </section>
-
-          <section class="section" aria-labelledby="where-heading">
-            <h2 id="where-heading">2. Where things live</h2>
-            <p class="muted">Use these Home Box surfaces — not a Home Assistant app store.</p>
+          <section class="section" aria-labelledby="instead-heading">
+            <h2 id="instead-heading">1. What you use instead</h2>
+            <p class="muted">These are the Home Box surfaces for setup and sharing.</p>
             <ul class="links">
-              <li><a href="/getting-started">Getting started</a> — this page</li>
-              <li><a href="/company-access">Company access</a> — sensory share to BMS (you choose sensors; companies are granted in BMS)</li>
-              <li><a href="/extras">Extras</a> — what Home Box includes instead of HA add-ons</li>
+              <li><a href="/getting-started">Getting started</a> — takeover and day-to-day use</li>
+              <li><a href="/company-access">Company access</a> — sensory share to BMS</li>
               <li><a href="/enroll/">Enroll</a> — wire / reclaim the box with a BMS QR</li>
               <li><a href="/import/">Device import</a> — Tuya Local CSV / Excel</li>
             </ul>
             <div class="cta-row">
-              <a class="cta" href="/company-access">Open Company access</a>
-              <a class="cta secondary" href="/extras">Open Extras</a>
+              <a class="cta" href="/getting-started">Open Getting started</a>
+              <a class="cta secondary" href="/company-access">Open Company access</a>
             </div>
           </section>
 
-          <section class="section" aria-labelledby="iot-heading">
-            <h2 id="iot-heading">3. Add more IoT (local only)</h2>
-            <p class="muted">Devices talk to this box on the house LAN — never through vendor clouds from here.</p>
-            <ol class="steps">
-              <li>Confirm the box is online on the BMS platform.</li>
-              <li>Prefer local protocols: Zigbee, Matter, <strong>Tuya Local</strong> (never Core “Tuya” cloud).</li>
-              <li>For Tuya Wi‑Fi: use <a href="/import/">Device import</a> or add Tuya Local manually (IP + device id + local key). Close Smart Life first.</li>
-              <li>Name devices clearly (e.g. heat pump, living room).</li>
-              <li>Confirm they stay available with <strong>no vendor cloud</strong> on the IoT VLAN.</li>
-            </ol>
-            <p class="banner warn" style="margin-top:0.85rem;margin-bottom:0;">
-              Never create a Tuya / Smart Life / Xiaomi cloud account as a Home Box step.
-              Sandbox cloud registration happens off this box.
-            </p>
+          <section class="section" aria-labelledby="tools-heading">
+            <h2 id="tools-heading">2. Lab & reclaim tools</h2>
+            <p class="muted">Same host port as Home Box — paths under the gateway.</p>
+            <ul class="links">
+              <li><a href="/enroll/">/enroll/</a> — enroll or reclaim with a BMS QR</li>
+              <li><a href="/import/">/import/</a> — import Tuya Local devices from CSV / Excel</li>
+            </ul>
             <div class="cta-row">
-              <a class="cta secondary" href="/import/">Open device import</a>
+              <a class="cta secondary" href="/enroll/">Open Enroll</a>
+              <a class="cta secondary" href="/import/">Open Device import</a>
             </div>
           </section>
 
-          <section class="section" aria-labelledby="help-heading">
-            <h2 id="help-heading">4. Get help</h2>
-            <p class="muted" style="margin-bottom:0;">
-              Contact BMS support through your contract — not Tuya or Xiaomi support as the remote path.
+          <section class="section" aria-labelledby="why-heading">
+            <h2 id="why-heading">3. Why the HA Apps page is blocked</h2>
+            <p class="muted" style="margin-bottom:0.65rem;">
+              Home Box runs a locked Core engine without Supervisor add-ons. That keeps
+              the house local and private. If you opened Settings → Apps, you were sent here
+              on purpose.
+            </p>
+            <p class="banner warn" style="margin-bottom:0;">
+              Do not install Home Assistant OS apps on this appliance. Use Getting started,
+              Company access, Enroll, and Device import instead.
             </p>
           </section>
         </div>
@@ -226,4 +199,4 @@ class HomeBoxGettingStarted extends HTMLElement {
     `;
   }
 }
-customElements.define("home-box-getting-started", HomeBoxGettingStarted);
+customElements.define("home-box-extras", HomeBoxExtras);

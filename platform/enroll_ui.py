@@ -35,6 +35,8 @@ DEFAULT_PLATFORM = os.environ.get("BMS_PLATFORM_URL", "").strip().rstrip("/")
 HA_URL = os.environ.get("BMS_HA_URL", "http://homeassistant:8123").rstrip("/")
 STATIC_DIR = Path(os.environ.get("BMS_ENROLL_STATIC", "/app/static"))
 HA_OPEN_URL = os.environ.get("HOME_BOX_OPEN_URL", "http://127.0.0.1:8123").rstrip("/")
+# When behind the box gateway: PUBLIC_BASE_PATH=/enroll (browser URLs only; nginx strips).
+APP_BASE = os.environ.get("PUBLIC_BASE_PATH", "").rstrip("/")
 
 
 def _env_flag(name: str, default: str = "0") -> bool:
@@ -82,7 +84,7 @@ PAGE = r"""<!DOCTYPE html>
     .countdown { font-size: 3.5rem; font-weight: 600; letter-spacing: -0.04em; line-height: 1; margin: .75rem 0 .35rem; color: var(--acc); }
     .countdown-sub { color: var(--muted); font-size: .95rem; line-height: 1.45; margin: 0; }
   </style>
-  <script src="/static/jsQR.min.js"></script>
+  <script src="__APP_BASE__/static/jsQR.min.js"></script>
 </head>
 <body>
   <main>
@@ -170,6 +172,8 @@ PAGE = r"""<!DOCTYPE html>
     </section>
   </main>
   <script>
+    const APP_BASE = "__APP_BASE__";
+    const u = (p) => APP_BASE + p;
     const statusEl = document.getElementById("status");
     const msgEl = document.getElementById("msg");
     const scanMsg = document.getElementById("scanMsg");
@@ -218,7 +222,7 @@ PAGE = r"""<!DOCTYPE html>
     }
 
     async function pollHelloOnce() {
-      const hello = await fetch("/api/hello", { method: "POST" });
+      const hello = await fetch(u("/api/hello"), { method: "POST" });
       const helloBody = await hello.json().catch(() => ({}));
       const state = String((helloBody && helloBody.bms_hello) || "").toLowerCase();
       const reachable = !!(helloBody && (helloBody.reachable || state === "standby" || state === "ok"));
@@ -281,7 +285,7 @@ PAGE = r"""<!DOCTYPE html>
 
     async function tryQrAdminBootstrap(doRedirect) {
       try {
-        const boot = await fetch("/api/owner-bootstrap", { method: "POST" });
+        const boot = await fetch(u("/api/owner-bootstrap"), { method: "POST" });
         const bootBody = await boot.json().catch(() => ({}));
         if (boot.ok && bootBody && bootBody.ok && !bootBody.skipped) {
           if (doRedirect === false) {
@@ -322,7 +326,7 @@ PAGE = r"""<!DOCTYPE html>
     }
 
     async function refresh() {
-      const r = await fetch("/api/status");
+      const r = await fetch(u("/api/status"));
       const s = await r.json();
       const allowReset = !!s.allow_reset;
       show("clear", allowReset);
@@ -395,7 +399,7 @@ PAGE = r"""<!DOCTYPE html>
       }
       let owner;
       try {
-        const r = await fetch("/api/owner-status");
+        const r = await fetch(u("/api/owner-status"));
         owner = await r.json();
       } catch (e) {
         owner = { ok: false };
@@ -447,7 +451,7 @@ PAGE = r"""<!DOCTYPE html>
       } else {
         delete body.platform_url;
       }
-      const r = await fetch("/api/enroll", {
+      const r = await fetch(u("/api/enroll"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -464,7 +468,7 @@ PAGE = r"""<!DOCTYPE html>
       if (hasWg) {
         enterWaitMode("Restarting WireGuard with keys from the QR…");
         try {
-          const apply = await fetch("/api/wg/apply", { method: "POST" });
+          const apply = await fetch(u("/api/wg/apply"), { method: "POST" });
           const applyBody = await apply.json().catch(() => ({}));
           const hint = (applyBody && applyBody.hint) || "";
           document.getElementById("countdownHint").textContent =
@@ -650,7 +654,7 @@ PAGE = r"""<!DOCTYPE html>
     };
 
     document.getElementById("clear").onclick = async () => {
-      const r = await fetch("/api/enroll", { method: "DELETE" });
+      const r = await fetch(u("/api/enroll"), { method: "DELETE" });
       const out = await r.json().catch(() => ({}));
       if (!r.ok) {
         setMsg(msgEl, out.error || "Clear blocked", true);
@@ -666,7 +670,7 @@ PAGE = r"""<!DOCTYPE html>
     document.getElementById("retryWait").onclick = async () => {
       enterWaitMode("Retrying WireGuard apply and BMS wait…");
       try {
-        await fetch("/api/wg/apply", { method: "POST" });
+        await fetch(u("/api/wg/apply"), { method: "POST" });
       } catch (e) {}
       const ok = await waitForBms(BMS_READY_WAIT_SECONDS);
       if (ok) await afterBmsOk();
@@ -699,7 +703,7 @@ PAGE = r"""<!DOCTYPE html>
       const password = document.getElementById("ownerPass").value;
       const password2 = document.getElementById("ownerPass2").value;
       if (password !== password2) { setMsg(ownerMsg, "Passwords do not match.", true); return; }
-      const r = await fetch("/api/owner", {
+      const r = await fetch(u("/api/owner"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, username, password }),
@@ -726,7 +730,7 @@ PAGE = r"""<!DOCTYPE html>
       const password = document.getElementById("resetPass").value;
       const password2 = document.getElementById("resetPass2").value;
       if (password !== password2) { setMsg(resetMsg, "Passwords do not match.", true); return; }
-      const r = await fetch("/api/password-reset", {
+      const r = await fetch(u("/api/password-reset"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -744,7 +748,7 @@ PAGE = r"""<!DOCTYPE html>
   </script>
 </body>
 </html>
-""".replace("__HA_OPEN__", HA_OPEN_URL)
+""".replace("__HA_OPEN__", HA_OPEN_URL).replace("__APP_BASE__", APP_BASE)
 
 
 def _bms_hello() -> dict:

@@ -1,7 +1,9 @@
-# BMS contract — Home Box limited share (two gates)
+# BMS contract — Home Box sensory share (two gates)
 
-Homeowners enable a **limited share** on the box. That alone shares with **nobody**.  
-A company sees data only after the homeowner also grants them in **BMS**.
+Homeowners enable a **sensory share** on the box and pick which **binary sensors** may leave.  
+That alone shares with **nobody**. A company sees data only after the homeowner also grants them in **BMS**.
+
+The Docker **sensory-feed** agent (`platform-agent` / `home-box-agent`) checks the feed every few seconds and **posts only when the feed is positive**. Idle/empty feeds are not pushed. Relays/switches are never included.
 
 Passwords / device commands are never part of this path.
 
@@ -12,110 +14,66 @@ Passwords / device commands are never part of this path.
 | Rule | Detail |
 | --- | --- |
 | Two gates | Box `limited_share_enabled` **and** active BMS `ShareGrant` |
-| Limited scope | Status telemetry + support activity (faults / unreachable) only |
+| Sensory only | Selected `binary_sensor.*` + HVAC status telemetry — **never** `switch.*` / DO |
+| Idle = no positive POST | Empty/inactive feed → no immediate status POST; still sends an idle snapshot every **60s** while share is ON |
+| Positive = POST | Active binary sensor (`on`) and/or HVAC mode not `off`/`unknown` |
 | No commands | Companies cannot turn devices on/off via this share |
 | Box toggle ≠ grant | Enabling on the box does not pick a company |
 
 ---
 
-## Gate 1 — Home Box (implemented in home-box)
+## Gate 1 — Home Box
 
 | Piece | Detail |
 | --- | --- |
-| UI | Sidebar **Company access** → “Allow limited share to BMS” |
-| Storage | `/config/bms_share.json` → `{ "limited_share_enabled": bool, "scope": ["status","support_activity"] }` |
-| API | `GET/POST /api/home_box/limited_share` (HA admin session) |
-| Agent | Heartbeat includes `limited_share_enabled` + scope |
-| Agent | `POST /ingest/status/` **only when** limited share is ON (devices + `support_activity`) |
+| UI | Sidebar **Company access** → sensory share + categories + sensors; **Open BMS** link to manage company grants |
+| Storage | `/config/bms_share.json` |
+| API | `GET/POST /api/home_box/limited_share` (includes `bms_manage_url`) |
+| Agent | Heartbeat ~20s; feed check every **5s** (env `BMS_INTERVAL`) |
+| Agent | `POST /ingest/status/` on **share allowlist change**, when share ON + feed positive, and an **idle snapshot every 60s** (`BMS_IDLE_SNAPSHOT_SECONDS`) while share stays ON |
+| Agent | `POST /ingest/location/` when share is **ON** (on share change + heartbeat), using HA home latitude/longitude + `location_name` as `label`, `source: "box"`. Same enroll bearer as heartbeat/status. Skipped if coords are missing. |
 
-When limited share is **OFF**, the agent still heartbeats (box online) but does **not** post status/support payloads.
+### `bms_share.json` shape
+
+`sensors`: `[{ "entity_id": "binary_sensor.…", "system": "<client label>" }]`  
+`categories`: `[ "hvac", "security", "kitchen", … ]` — labels managed in Company access UI  
+`system` is chosen **per sensor by the client** — domain or location.  
+Home Box never invents or validates against a fixed list; it only slugs for transport.  
+`sensor_entities` remains a derived id list for older readers.
 
 ---
 
-## Gate 2 — BMS (implement in home_automation)
+## Gate 2 — BMS
 
-### Heartbeat / snapshot
+Same two-gate visibility as before.  
+Status ingest includes each device’s client `system` string as-is (plus `telemetry.sensor.classification`).  
+**BMS must accept free-form `system` values** (domain or location), not only a fixed enum — otherwise location labels and custom names return HTTP 400 (`Unknown system`).
 
-Accept and persist from ingest heartbeat (or equivalent):
+Heat-pump rows still use `class: "heat_pump"` with `system: "hvac"` (HA climate domain).
 
-```json
-{
-  "limited_share_enabled": true,
-  "limited_share_scope": ["status", "support_activity"],
-  "appliance_uid": "…"
-}
-```
-
-Expose on machine snapshot (optional but useful for owner UI):
-
-```json
-"machine": {
-  "limited_share_enabled": true
-}
-```
-
-Default when missing: `false`.
-
-### Company visibility rule
-
-Company status APIs must return household/device data only when **all** are true:
-
-1. Non-revoked `ShareGrant` for that household ↔ company (and domain)
-2. Box `limited_share_enabled === true` (latest heartbeat / stored flag)
-3. Subscription not fail-closed
-
-If the box turns limited share off, companies lose visibility even if the grant remains (grant can stay for when the owner re-enables).
-
-### Owner grant UX
-
-Homeowner (client portal / BMS owner login — when available):
-
-1. Sees box limited-share state (on/off)
-2. Grants / revokes company share for domains (e.g. `hvac`) — existing ShareGrant model
-3. Copy: “Companies only get status & support activity, and only while limited share is on on the box.”
-
-Staff may help create companies; **homeowner** owns the grant.
-
-### Status ingest
-
-`POST /ingest/status/` may include:
-
-```json
-{
-  "devices": [ /* existing shape */ ],
-  "support_activity": [
-    { "type": "fault_signal", "entity_id": "…", "state": "on", "name": "…" },
-    { "type": "device_unreachable", "entity_id": "climate.…", "state": "unavailable", "name": "…" }
-  ],
-  "limited_share": true
-}
-```
-
-BMS should ignore or reject status bodies when stored `limited_share_enabled` is false (defense in depth).
+Optional body field: `"feed": "sensory"`.
 
 ---
 
 ## Sequence
 
 ```text
-Owner enables Limited share on Home Box
+Owner enables sensory share + selects HLK DI sensors on Home Box
         │
         ▼
 Agent heartbeats limited_share_enabled=true
-Agent posts status + support_activity
+Agent POSTs /ingest/location/ (HA home coords) on share change + heartbeats
+Agent polls feed every 5s
         │
-        ▼
+   feed idle ──▶ idle snapshot every 60s (BMS_IDLE_SNAPSHOT_SECONDS)
+   feed positive ──▶ POST /ingest/status/ immediately
+        │
   (still no company can see it)
         │
-Owner grants company X in BMS
+Owner grants company in BMS (e.g. security domain)
         │
         ▼
-Company X sees limited status/support for granted domains
-        │
-Owner toggles Limited share OFF on box  ──or──  revokes grant in BMS
-        │
-        ▼
-Company X loses visibility
+Company sees allowed sensory devices for granted domains
 ```
 
 ---
@@ -123,16 +81,7 @@ Company X loses visibility
 ## Acceptance checklist (BMS)
 
 - [ ] Persist `limited_share_enabled` from heartbeat
+- [ ] Accept `binary_input` devices with **free-form** `system` (domain or location)
+- [ ] Accept `POST /ingest/location/` with enroll bearer; store on household for company map when grant + share
 - [ ] Company status requires grant **and** box flag
-- [ ] Owner grant/revoke UX copy matches two-gate model
 - [ ] No passwords / command APIs on this path
-- [ ] Tests: grant alone insufficient; flag alone insufficient; both required
-
----
-
-## Out of scope (v1)
-
-- Full HA logbook dump  
-- Auto-picking a company from the box  
-- OEM / Tuya cloud sharing  
-- Optional `password_reset_ack`-style ack for share (not required)
