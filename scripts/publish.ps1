@@ -1,6 +1,7 @@
-# Build and push Home Box images to Docker Hub (avniademi/*).
+# Build and push Home Box images to Docker Hub.
+# Prompts for Hub username + token (no env files, no other scripts).
 param(
-  [string]$RegistryUser = "avniademi",
+  [string]$RegistryUser = "",
   [string]$Tag = "0.1.0",
   [switch]$Latest = $true,
   [switch]$SkipLogin = $false
@@ -11,19 +12,23 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
 Set-Location $Root
 
 if (-not $SkipLogin) {
-  & (Join-Path $PSScriptRoot "docker-login.ps1")
-  if ($env:DOCKERHUB_USER) { $RegistryUser = $env:DOCKERHUB_USER }
-  $envFile = Join-Path $PSScriptRoot "docker-hub.env"
-  if (Test-Path $envFile) {
-    Get-Content $envFile | ForEach-Object {
-      $line = $_.Trim()
-      if (-not $line -or $line.StartsWith("#")) { return }
-      $parts = $line.Split("=", 2)
-      if ($parts.Count -eq 2 -and $parts[0].Trim() -eq "DOCKERHUB_USER") {
-        $RegistryUser = $parts[1].Trim().Trim('"').Trim("'")
-      }
-    }
+  if (-not $RegistryUser) {
+    $RegistryUser = (Read-Host "Docker Hub username [avniademi]").Trim()
+    if (-not $RegistryUser) { $RegistryUser = "avniademi" }
   }
+  $secure = Read-Host "Docker Hub access token (or password)" -AsSecureString
+  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+  try {
+    $token = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+  } finally {
+    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+  }
+  if (-not $token) { throw "Docker Hub token is required." }
+  $token | docker login -u $RegistryUser --password-stdin
+  if ($LASTEXITCODE -ne 0) { throw "docker login failed" }
+  Write-Host "Docker Hub login ok as $RegistryUser"
+} elseif (-not $RegistryUser) {
+  $RegistryUser = "avniademi"
 }
 
 function Push-Tagged([string]$Name) {

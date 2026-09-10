@@ -34,19 +34,17 @@ Images are built with `.dockerignore` so `config/`, `.env`, and `scripts/docker-
 
 ## Publish (maintainers)
 
-Credentials live in **gitignored** `scripts/docker-hub.env` (copy from `docker-hub.env.example`). Do not commit the PAT.
+Scripts ask for Docker Hub username + access token interactively (nothing stored in git).
 
 ```powershell
-# scripts/docker-hub.env already loads on publish
-.\scripts\docker-login.ps1
-.\scripts\publish.ps1 -RegistryUser avniademi -Tag 0.1.0
+.\scripts\publish.ps1 -Tag 0.1.0
 ```
 
 ```bash
-cp scripts/docker-hub.env.example scripts/docker-hub.env   # once
-# edit DOCKERHUB_TOKEN=
-./scripts/docker-login.sh
+chmod +x scripts/publish.sh
 ./scripts/publish.sh
 ```
+
+Optional: `-SkipLogin` / `SKIP_DOCKER_LOGIN=1` if you already ran `docker login`.
 
 Lab development still uses the repo-root `compose.yaml` with bind mounts.

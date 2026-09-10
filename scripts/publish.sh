@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
-# Build and push Home Box images to Docker Hub (default: avniademi).
+# Build and push Home Box images to Docker Hub.
+# Prompts for Hub username + token (no env files, no other scripts).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 SKIP_LOGIN="${SKIP_DOCKER_LOGIN:-0}"
-
-if [ "${SKIP_LOGIN}" != "1" ]; then
-  bash "${SCRIPT_DIR}/docker-login.sh"
-fi
-
-USER_NAME="${DOCKERHUB_USER:-avniademi}"
-if [ -f "${SCRIPT_DIR}/docker-hub.env" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      ''|\#*) continue ;;
-    esac
-    key="${line%%=*}"
-    val="${line#*=}"
-    key="$(echo "$key" | tr -d '[:space:]')"
-    if [ "$key" = "DOCKERHUB_USER" ] && [ -n "$val" ]; then
-      USER_NAME="$(echo "$val" | tr -d '[:space:]' | tr -d \"\' )"
-    fi
-  done < "${SCRIPT_DIR}/docker-hub.env"
-fi
-
 TAG="${HOME_BOX_TAG:-0.1.0}"
 LATEST="${PUSH_LATEST:-1}"
+USER_NAME="${DOCKERHUB_USER:-}"
+
+if [ "${SKIP_LOGIN}" != "1" ]; then
+  if [ -z "${USER_NAME}" ]; then
+    read -r -p "Docker Hub username [avniademi]: " USER_NAME
+    USER_NAME="${USER_NAME:-avniademi}"
+  fi
+  read -r -s -p "Docker Hub access token (or password): " TOKEN
+  echo
+  if [ -z "${TOKEN}" ]; then
+    echo "Docker Hub token is required." >&2
+    exit 1
+  fi
+  printf '%s' "${TOKEN}" | docker login -u "${USER_NAME}" --password-stdin
+  unset TOKEN
+  echo "Docker Hub login ok as ${USER_NAME}"
+else
+  USER_NAME="${USER_NAME:-avniademi}"
+fi
 
 push_tagged() {
   local name="$1"
